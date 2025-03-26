@@ -1,0 +1,35 @@
+[package]
+name = "reflector"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.clap]
+version = "4.5.32"
+features = ["derive"]
+
+[dependencies.base64]
+version = "0.22.1"
+
+[dependencies.reqwest]
+version = "0.12.15"
+
+[dependencies.serde]
+version = "1.0.219"
+
+[dependencies.threadpool]
+version = "1.8.1"
+
+[dependencies.regex]
+version = "1.11.1"
+
+[dependencies.url]
+version = "2.5.4"
+
+[dependencies.log]
+version = "0.4.27"
+
+[dependencies.fern]
+version = "0.7.1"
+
+[dependencies.thiserror]
+version = "2.0.12"
