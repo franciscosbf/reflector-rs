@@ -112,7 +112,7 @@ fn parse_duration_in_secs(s: &str) -> Result<Duration, ParseIntError> {
 }
 
 fn parse_percentage(s: &str) -> Result<f64, String> {
-    let raw = s.parse::<f64>().map_err(|err| format!("{}", err))?;
+    let raw = s.parse::<f64>().map_err(|err| err.to_string())?;
 
     if (0_f64..=100_f64).contains(&raw) {
         Ok(raw)
