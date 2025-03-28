@@ -22,7 +22,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
 use url::Url;
 
-const LOG_NAME: &str = "reflector";
+const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
 const DEFAULT_MIRRORS_URL: &str = "https://archlinux.org/mirrors/status/json/";
 
@@ -321,7 +321,7 @@ fn initialize_logger(verbose: bool) {
                 "[{}] [{}] [{}] {}",
                 humantime::format_rfc3339_millis(SystemTime::now()),
                 colored_level.color(record.level()),
-                LOG_NAME,
+                PKG_NAME,
                 message
             ));
         })
@@ -358,7 +358,8 @@ fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
         Err(_) => expanduser(DEFAULT_CACHE_DIR).unwrap(),
     };
     let cache_file = format!(
-        "{}.json",
+        "{}-{}.json",
+        PKG_NAME,
         BASE64_URL_SAFE.encode(reflector.url.as_str().as_bytes())
     );
     let cache_location = cache_dir.join(cache_file);
