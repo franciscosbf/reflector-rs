@@ -7,14 +7,25 @@ edition = "2024"
 version = "4.5.32"
 features = ["derive"]
 
+[dependencies.clap-num]
+version = "1.2.0"
+
+[dependencies.chrono]
+version = "0.4.40"
+
 [dependencies.base64]
 version = "0.22.1"
 
 [dependencies.reqwest]
 version = "0.12.15"
+features = ["json", "blocking"]
 
 [dependencies.serde]
 version = "1.0.219"
+features = ["derive"]
+
+[dependencies.serde_json]
+version = "1.0.140"
 
 [dependencies.threadpool]
 version = "1.8.1"
@@ -30,6 +41,16 @@ version = "0.4.27"
 
 [dependencies.fern]
 version = "0.7.1"
+features = ["colored"]
+
+[dependencies.humantime]
+version = "2.2.0"
 
 [dependencies.thiserror]
 version = "2.0.12"
+
+[dependencies.anyhow]
+version = "1.0.97"
+
+[dependencies.expanduser]
+version = "1.2.2"
