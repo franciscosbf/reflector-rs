@@ -13,7 +13,6 @@ use anyhow::Context;
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Args, Parser, ValueEnum};
-use clap_num::number_range;
 use expanduser::expanduser;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::LevelFilter;
@@ -112,8 +111,14 @@ fn parse_duration_in_secs(s: &str) -> Result<Duration, ParseIntError> {
     Ok(Duration::from_secs(raw))
 }
 
-fn parse_percentage(s: &str) -> Result<u64, String> {
-    number_range(s, 0, 100)
+fn parse_percentage(s: &str) -> Result<f64, String> {
+    let raw = s.parse::<f64>().map_err(|err| format!("{}", err))?;
+
+    if (0_f64..=100_f64).contains(&raw) {
+        Ok(raw)
+    } else {
+        Err("must be between 0 and 100".to_string())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
@@ -243,10 +248,10 @@ struct Filters {
         long,
         value_name = "0-100",
         value_parser = parse_percentage,
-        default_value_t = 100,
+        default_value_t = 100.,
         verbatim_doc_comment
     )]
-    completion_percent: u64,
+    completion_percent: f64,
     /// Only return mirrors that host ISOs
     #[arg(long)]
     isos: bool,
@@ -372,8 +377,8 @@ fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
             return Ok(status);
         }
         Ok(None) => {}
-        Err(error) => {
-            log::warn!("Failed to read cached mirrors: {}", error);
+        Err(err) => {
+            log::warn!("Failed to read cached mirrors: {}", err);
         }
     }
 
