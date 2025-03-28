@@ -7,9 +7,6 @@ edition = "2024"
 version = "4.5.32"
 features = ["derive"]
 
-[dependencies.clap-num]
-version = "1.2.0"
-
 [dependencies.chrono]
 version = "0.4.40"
 
