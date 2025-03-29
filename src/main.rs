@@ -398,13 +398,9 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
     let mut closures: Vec<Box<dyn Fn(&'s MirrorStatus) -> bool>> = vec![];
     let mut add_closure = |filter| closures.push(filter);
 
-    add_closure(Box::new(|m: &MirrorStatus| -> bool {
-        m.last_sync.is_some() && m.delay.is_some()
-    }));
-
     let min_completion_pct = filters.completion_percent / 100.;
-    add_closure(Box::new(move |m: &MirrorStatus| -> bool {
-        m.completion_pct >= min_completion_pct
+    add_closure(Box::new(move |m| {
+        m.last_sync.is_some() && m.delay.is_some() && m.completion_pct >= min_completion_pct
     }));
 
     if let Some(ref countries) = filters.countries {
