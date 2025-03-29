@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
+    cmp::Ordering,
     collections::HashSet,
     env,
     fs::{self, File},
@@ -476,7 +477,12 @@ fn sort_by_age(mirrors: &mut Vec<&MirrorStatus>) {
 }
 
 fn sort_by_score(mirrors: &mut Vec<&MirrorStatus>) {
-    mirrors.sort_by(|a, b| a.score.unwrap().partial_cmp(&b.score.unwrap()).unwrap());
+    mirrors.sort_by(|a, b| {
+        a.score
+            .unwrap()
+            .partial_cmp(&b.score.unwrap())
+            .unwrap_or(Ordering::Less)
+    });
 }
 
 fn sort_by_rate(
