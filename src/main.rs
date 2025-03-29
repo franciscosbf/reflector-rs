@@ -143,9 +143,6 @@ struct MirrorStatus {
     last_sync: Option<DateTime<Utc>>,
     completion_pct: f64,
     delay: Option<u64>,
-    duration_avg: Option<f64>,
-    duration_stddev: Option<f64>,
-    score: Option<f64>,
     active: bool,
     country: String,
     country_code: String,
@@ -396,7 +393,8 @@ fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
 }
 
 fn filter_mirrors<'a>(filters: &Filters, status: &'a Status) -> Vec<&'a MirrorStatus> {
-    let last_sync = |m: &MirrorStatus| -> bool { m.last_sync.is_some() };
+    let with_last_sync = |m: &MirrorStatus| -> bool { m.last_sync.is_some() };
+    let with_delay = |m: &MirrorStatus| -> bool { m.delay.is_some() };
 
     let completion_pct_threshold = filters.completion_percent / 100.;
     let min_completion_pct =
@@ -448,16 +446,48 @@ fn filter_mirrors<'a>(filters: &Filters, status: &'a Status) -> Vec<&'a MirrorSt
         None => Box::new(|_| true),
     };
 
+    let delay: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.delay {
+        Some(delay) => {
+            let delay = delay * 3600.;
+
+            Box::new(move |m| m.delay.unwrap() as f64 <= delay)
+        }
+        None => Box::new(|_| true),
+    };
+
+    let isos: Box<dyn Fn(&MirrorStatus) -> bool> = if filters.isos {
+        Box::new(|m| m.isos)
+    } else {
+        Box::new(|_| true)
+    };
+
+    let ipv4: Box<dyn Fn(&MirrorStatus) -> bool> = if filters.ipv4 {
+        Box::new(|m| m.ipv4)
+    } else {
+        Box::new(|_| true)
+    };
+
+    let ipv6: Box<dyn Fn(&MirrorStatus) -> bool> = if filters.ipv6 {
+        Box::new(|m| m.ipv6)
+    } else {
+        Box::new(|_| true)
+    };
+
     status
         .urls
         .iter()
-        .filter(|m| last_sync(m))
+        .filter(|m| with_last_sync(m))
+        .filter(|m| with_delay(m))
         .filter(|m| min_completion_pct(m))
         .filter(|m| countries(m))
         .filter(|m| protocols(m))
         .filter(|m| include(m))
         .filter(|m| exclude(m))
         .filter(|m| age(m))
+        .filter(|m| delay(m))
+        .filter(|m| isos(m))
+        .filter(|m| ipv4(m))
+        .filter(|m| ipv6(m))
         .collect()
 }
 
