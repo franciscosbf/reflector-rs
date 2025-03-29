@@ -473,15 +473,20 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
 }
 
 fn sort_by_age(mirrors: &mut Vec<&MirrorStatus>) {
-    mirrors.sort_by(|a, b| a.last_sync.unwrap().cmp(&b.last_sync.unwrap()));
+    mirrors.sort_by(|a, b| {
+        let a = a.last_sync.unwrap();
+        let b = b.last_sync.unwrap();
+
+        a.cmp(&b)
+    });
 }
 
 fn sort_by_score(mirrors: &mut Vec<&MirrorStatus>) {
     mirrors.sort_by(|a, b| {
-        a.score
-            .unwrap()
-            .partial_cmp(&b.score.unwrap())
-            .unwrap_or(Ordering::Less)
+        let a = a.score.unwrap();
+        let b = b.score.unwrap();
+
+        a.partial_cmp(&b).unwrap_or(Ordering::Less)
     });
 }
 
@@ -505,7 +510,12 @@ fn sort_by_country(mirrors: &mut Vec<&MirrorStatus>, countries: Option<&Vec<Stri
 }
 
 fn sort_by_delay(mirrors: &mut Vec<&MirrorStatus>) {
-    mirrors.sort_by(|a, b| a.delay.unwrap().cmp(&b.delay.unwrap()));
+    mirrors.sort_by(|a, b| {
+        let a = a.delay.unwrap();
+        let b = b.delay.unwrap();
+
+        a.cmp(&b)
+    });
 }
 
 fn process_mirrors<'s>(
