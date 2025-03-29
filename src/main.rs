@@ -477,7 +477,7 @@ fn sort_by_age(mirrors: &mut Vec<&MirrorStatus>) {
         let a = a.last_sync.unwrap();
         let b = b.last_sync.unwrap();
 
-        a.cmp(&b)
+        b.cmp(&a)
     });
 }
 
