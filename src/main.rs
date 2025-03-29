@@ -486,7 +486,7 @@ fn sort_by_score(mirrors: &mut Vec<&MirrorStatus>) {
         let a = a.score.unwrap();
         let b = b.score.unwrap();
 
-        a.partial_cmp(&b).unwrap_or(Ordering::Less)
+        a.partial_cmp(&b).unwrap()
     });
 }
 
