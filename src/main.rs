@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
+    collections::HashSet,
     env,
     fs::{self, File},
     io::{self, Read},
@@ -121,7 +122,7 @@ fn parse_percentage(s: &str) -> Result<f64, String> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ValueEnum, Hash)]
 #[serde(rename_all = "lowercase")]
 enum Protocol {
     Http,
@@ -236,12 +237,12 @@ struct Filters {
     /// using commas (e.g. "https,http") or by passing this option multiple times
     #[arg(
         short,
-        long,
+        long = "protocol",
         value_name = "protocol",
         value_delimiter = ',',
         verbatim_doc_comment
     )]
-    protocol: Option<Vec<Protocol>>,
+    protocols: Option<Vec<Protocol>>,
     /// Set the minimum completion percent for the returned mirrors. Check the mirror status webpage
     /// for the meaning of this parameter
     #[arg(
@@ -394,12 +395,84 @@ fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
     Ok(status)
 }
 
-fn process_mirrors(
+fn filter_mirrors<'a>(filters: &Filters, status: &'a Status) -> Vec<&'a MirrorStatus> {
+    let include_with_info = |m: &MirrorStatus| -> bool {
+        m.last_sync.is_some()
+            && m.delay.is_some()
+            && m.duration_avg.is_some()
+            && m.duration_stddev.is_some()
+            && m.score.is_some()
+    };
+
+    let completion_pct_threshold = filters.completion_percent / 100.;
+    let min_completion_pct =
+        move |m: &MirrorStatus| -> bool { m.completion_pct >= completion_pct_threshold };
+
+    let countries: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.countries {
+        Some(ref countries) if !countries.iter().any(|country| country == "*") => {
+            let countries = countries
+                .iter()
+                .map(|country| country.to_uppercase())
+                .collect::<HashSet<_>>();
+
+            Box::new(move |m| {
+                countries.contains(&m.country.to_uppercase())
+                    || countries.contains(&m.country_code.to_uppercase())
+            })
+        }
+        Some(_) | None => Box::new(|_| true),
+    };
+
+    let protocols: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.protocols {
+        Some(ref protocols) => {
+            let protocols = protocols.iter().cloned().collect::<HashSet<_>>();
+
+            Box::new(move |m| protocols.contains(&m.protocol))
+        }
+        None => Box::new(|_| true),
+    };
+
+    let include: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.include {
+        Some(ref include) => Box::new(move |m| include.iter().any(|r| r.is_match(m.url.as_str()))),
+        None => Box::new(|_| true),
+    };
+
+    let exclude: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.exclude {
+        Some(ref exclude) => Box::new(move |m| !exclude.iter().any(|r| r.is_match(m.url.as_str()))),
+        None => Box::new(|_| true),
+    };
+
+    let age: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.age {
+        Some(age) => {
+            let now = SystemTime::now();
+            let age = Duration::from_secs_f64(age * 3600.);
+
+            Box::new(move |m| {
+                SystemTime::from(m.last_sync.unwrap()) >= now.checked_sub(age).unwrap()
+            })
+        }
+        None => Box::new(|_| true),
+    };
+
+    status
+        .urls
+        .iter()
+        .filter(|m| include_with_info(m))
+        .filter(|m| min_completion_pct(m))
+        .filter(|m| countries(m))
+        .filter(|m| protocols(m))
+        .filter(|m| include(m))
+        .filter(|m| exclude(m))
+        .filter(|m| age(m))
+        .collect()
+}
+
+fn process_mirrors<'a>(
     reflector: &Reflector,
-    status: &Status,
-) -> Result<Vec<MirrorStatus>, ReflectorError> {
-    let _ = reflector;
-    let _ = status;
+    status: &'a Status,
+) -> Result<Vec<&'a MirrorStatus>, ReflectorError> {
+    let filtered_mirrors = filter_mirrors(&reflector.filters, status);
+    let _ = filtered_mirrors;
 
     todo!()
 }
@@ -410,13 +483,13 @@ fn output_countries(mirrors: &[MirrorStatus]) {
     todo!()
 }
 
-fn output_mirrors(mirrors: &[MirrorStatus]) {
+fn output_mirrors(mirrors: &[&MirrorStatus]) {
     let _ = mirrors;
 
     todo!()
 }
 
-fn record_mirrors(mirrors: &[MirrorStatus], location: &Path) -> Result<(), ReflectorError> {
+fn record_mirrors(mirrors: &[&MirrorStatus], location: &Path) -> Result<(), ReflectorError> {
     let _ = mirrors;
     let _ = location;
 
