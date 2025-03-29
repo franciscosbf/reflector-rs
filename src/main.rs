@@ -163,7 +163,7 @@ struct Status {
     urls: Vec<MirrorStatus>,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Sort {
     /// Last server synchronization
     Age,
@@ -467,14 +467,102 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
         .collect()
 }
 
-fn process_mirrors<'a>(
-    reflector: &'a Reflector,
-    status: &'a Status,
-) -> Result<Vec<&'a MirrorStatus>, ReflectorError> {
-    let filtered_mirrors = filter_mirrors(&reflector.filters, status);
-    let _ = filtered_mirrors;
+fn sort_by_age(mirrors: &mut Vec<&MirrorStatus>) {
+    let _ = mirrors;
 
     todo!()
+}
+
+fn sort_by_score(mirrors: &mut Vec<&MirrorStatus>) {
+    let _ = mirrors;
+
+    todo!()
+}
+
+fn sort_by_rate(
+    mirrors: &mut Vec<&MirrorStatus>,
+    connection_timeout: Duration,
+    download_timeout: Duration,
+) {
+    let _ = mirrors;
+    let _ = connection_timeout;
+    let _ = download_timeout;
+
+    todo!()
+}
+
+fn sort_by_country(mirrors: &mut Vec<&MirrorStatus>, countries: Option<&Vec<String>>) {
+    let _ = mirrors;
+    let _ = countries;
+
+    todo!()
+}
+
+fn sort_by_delay(mirrors: &mut Vec<&MirrorStatus>) {
+    let _ = mirrors;
+
+    todo!()
+}
+
+fn process_mirrors<'s>(
+    reflector: &'s Reflector,
+    status: &'s Status,
+) -> Result<Vec<&'s MirrorStatus>, ReflectorError> {
+    let filters = &reflector.filters;
+    let connection_timeout = Duration::from_secs(reflector.connection_timeout);
+    let download_timeout = Duration::from_secs(reflector.donwload_timeout);
+
+    let mut mirrors = filter_mirrors(filters, status);
+    if mirrors.is_empty() {
+        return Err(ReflectorError::WithoutMirrors);
+    }
+
+    let smirrors = &mut mirrors;
+
+    match filters.latest {
+        Some(latest) if latest > 0 => {
+            sort_by_age(smirrors);
+            smirrors.truncate(latest as usize);
+        }
+        _ => (),
+    }
+
+    match filters.score {
+        Some(score) if score > 0 => {
+            sort_by_score(smirrors);
+            smirrors.truncate(score as usize);
+        }
+        _ => (),
+    }
+
+    match filters.fastest {
+        Some(fastest) if fastest > 0 => {
+            sort_by_rate(smirrors, connection_timeout, download_timeout);
+            smirrors.truncate(fastest as usize);
+        }
+        _ => (),
+    }
+
+    match reflector.sort {
+        Some(sort) if !(sort == Sort::Rate && filters.fastest.is_some()) => match sort {
+            Sort::Age => sort_by_age(smirrors),
+            Sort::Rate => sort_by_rate(smirrors, connection_timeout, download_timeout),
+            Sort::Country => sort_by_country(smirrors, filters.countries.as_ref()),
+            Sort::Score => sort_by_score(smirrors),
+            Sort::Delay => sort_by_delay(smirrors),
+        },
+        _ => (),
+    }
+
+    if let Some(number) = filters.number {
+        smirrors.truncate(number as usize);
+    }
+
+    if !mirrors.is_empty() {
+        Ok(mirrors)
+    } else {
+        Err(ReflectorError::WithoutMirrors)
+    }
 }
 
 fn output_countries(mirrors: &[MirrorStatus]) {
