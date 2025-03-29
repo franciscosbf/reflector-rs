@@ -38,6 +38,8 @@ const DEFAULT_CONNECTION_TIMEOUT: u64 = 5;
 const DEFAULT_DOWNLOAD_TIMEOUT: u64 = 5;
 const DEFAULT_CACHE_TIMEOUT: u64 = 300;
 
+const ONE_HOUR_IN_SECS: f64 = 3600.;
+
 #[derive(Debug, Error)]
 pub enum ReflectorError {
     #[error(transparent)]
@@ -392,107 +394,85 @@ fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
     Ok(status)
 }
 
-fn filter_mirrors<'a>(filters: &Filters, status: &'a Status) -> Vec<&'a MirrorStatus> {
-    let with_last_sync = |m: &MirrorStatus| -> bool { m.last_sync.is_some() };
-    let with_delay = |m: &MirrorStatus| -> bool { m.delay.is_some() };
+fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorStatus> {
+    let mut closures: Vec<Box<dyn Fn(&'s MirrorStatus) -> bool>> = vec![];
+    let mut add_closure = |filter| closures.push(filter);
 
-    let completion_pct_threshold = filters.completion_percent / 100.;
-    let min_completion_pct =
-        move |m: &MirrorStatus| -> bool { m.completion_pct >= completion_pct_threshold };
+    add_closure(Box::new(|m: &MirrorStatus| -> bool {
+        m.last_sync.is_some() && m.delay.is_some()
+    }));
 
-    let countries: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.countries {
-        Some(ref countries) if !countries.iter().any(|country| country == "*") => {
-            let countries = countries
-                .iter()
-                .map(|country| country.to_uppercase())
-                .collect::<HashSet<_>>();
+    let min_completion_pct = filters.completion_percent / 100.;
+    add_closure(Box::new(move |m: &MirrorStatus| -> bool {
+        m.completion_pct >= min_completion_pct
+    }));
 
-            Box::new(move |m| {
-                countries.contains(&m.country.to_uppercase())
-                    || countries.contains(&m.country_code.to_uppercase())
-            })
-        }
-        Some(_) | None => Box::new(|_| true),
-    };
+    if let Some(ref countries) = filters.countries {
+        let countries = countries
+            .iter()
+            .map(|country| country.to_uppercase())
+            .collect::<HashSet<_>>();
 
-    let protocols: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.protocols {
-        Some(ref protocols) => {
-            let protocols = protocols.iter().cloned().collect::<HashSet<_>>();
+        add_closure(Box::new(move |m| {
+            countries.contains(&m.country.to_uppercase())
+                || countries.contains(&m.country_code.to_uppercase())
+        }));
+    }
 
-            Box::new(move |m| protocols.contains(&m.protocol))
-        }
-        None => Box::new(|_| true),
-    };
+    if let Some(ref protocols) = filters.protocols {
+        let protocols = protocols.iter().cloned().collect::<HashSet<_>>();
 
-    let include: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.include {
-        Some(ref include) => Box::new(move |m| include.iter().any(|r| r.is_match(m.url.as_str()))),
-        None => Box::new(|_| true),
-    };
+        add_closure(Box::new(move |m| protocols.contains(&m.protocol)));
+    }
 
-    let exclude: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.exclude {
-        Some(ref exclude) => Box::new(move |m| !exclude.iter().any(|r| r.is_match(m.url.as_str()))),
-        None => Box::new(|_| true),
-    };
+    if let Some(ref include) = filters.include {
+        add_closure(Box::new(move |m| {
+            include.iter().any(|r| r.is_match(m.url.as_str()))
+        }));
+    }
 
-    let age: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.age {
-        Some(age) => {
-            let now = SystemTime::now();
-            let age = Duration::from_secs_f64(age * 3600.);
+    if let Some(ref exclude) = filters.exclude {
+        add_closure(Box::new(move |m| {
+            !exclude.iter().any(|r| r.is_match(m.url.as_str()))
+        }));
+    }
 
-            Box::new(move |m| {
-                SystemTime::from(m.last_sync.unwrap()) >= now.checked_sub(age).unwrap()
-            })
-        }
-        None => Box::new(|_| true),
-    };
+    if let Some(age) = filters.age {
+        let now = SystemTime::now();
+        let age = Duration::from_secs_f64(age * ONE_HOUR_IN_SECS);
 
-    let delay: Box<dyn Fn(&MirrorStatus) -> bool> = match filters.delay {
-        Some(delay) => {
-            let delay = delay * 3600.;
+        add_closure(Box::new(move |m| {
+            SystemTime::from(m.last_sync.unwrap()) >= now.checked_sub(age).unwrap()
+        }));
+    }
 
-            Box::new(move |m| m.delay.unwrap() as f64 <= delay)
-        }
-        None => Box::new(|_| true),
-    };
+    if let Some(delay) = filters.delay {
+        let delay = delay * ONE_HOUR_IN_SECS;
 
-    let isos: Box<dyn Fn(&MirrorStatus) -> bool> = if filters.isos {
-        Box::new(|m| m.isos)
-    } else {
-        Box::new(|_| true)
-    };
+        add_closure(Box::new(move |m| m.delay.unwrap() as f64 <= delay));
+    }
 
-    let ipv4: Box<dyn Fn(&MirrorStatus) -> bool> = if filters.ipv4 {
-        Box::new(|m| m.ipv4)
-    } else {
-        Box::new(|_| true)
-    };
+    if filters.isos {
+        add_closure(Box::new(|m| m.isos));
+    }
 
-    let ipv6: Box<dyn Fn(&MirrorStatus) -> bool> = if filters.ipv6 {
-        Box::new(|m| m.ipv6)
-    } else {
-        Box::new(|_| true)
-    };
+    if filters.ipv4 {
+        add_closure(Box::new(|m| m.ipv4));
+    }
+
+    if filters.ipv6 {
+        add_closure(Box::new(|m| m.ipv6));
+    }
 
     status
         .urls
         .iter()
-        .filter(|m| with_last_sync(m))
-        .filter(|m| with_delay(m))
-        .filter(|m| min_completion_pct(m))
-        .filter(|m| countries(m))
-        .filter(|m| protocols(m))
-        .filter(|m| include(m))
-        .filter(|m| exclude(m))
-        .filter(|m| age(m))
-        .filter(|m| delay(m))
-        .filter(|m| isos(m))
-        .filter(|m| ipv4(m))
-        .filter(|m| ipv6(m))
+        .filter(|m| closures.iter().all(|f| f(m)))
         .collect()
 }
 
 fn process_mirrors<'a>(
-    reflector: &Reflector,
+    reflector: &'a Reflector,
     status: &'a Status,
 ) -> Result<Vec<&'a MirrorStatus>, ReflectorError> {
     let filtered_mirrors = filter_mirrors(&reflector.filters, status);
@@ -536,8 +516,8 @@ fn main() -> anyhow::Result<()> {
     let mirrors =
         process_mirrors(&reflector, &status).context("failed to process retrieved mirrors")?;
 
-    if let Some(save) = reflector.save {
-        record_mirrors(&mirrors, &save).context("failed to write mirrors")?;
+    if let Some(ref save) = reflector.save {
+        record_mirrors(&mirrors, save).context("failed to write mirrors")?;
     } else {
         output_mirrors(&mirrors);
     }
