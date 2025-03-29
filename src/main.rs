@@ -396,13 +396,7 @@ fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
 }
 
 fn filter_mirrors<'a>(filters: &Filters, status: &'a Status) -> Vec<&'a MirrorStatus> {
-    let include_with_info = |m: &MirrorStatus| -> bool {
-        m.last_sync.is_some()
-            && m.delay.is_some()
-            && m.duration_avg.is_some()
-            && m.duration_stddev.is_some()
-            && m.score.is_some()
-    };
+    let last_sync = |m: &MirrorStatus| -> bool { m.last_sync.is_some() };
 
     let completion_pct_threshold = filters.completion_percent / 100.;
     let min_completion_pct =
@@ -457,7 +451,7 @@ fn filter_mirrors<'a>(filters: &Filters, status: &'a Status) -> Vec<&'a MirrorSt
     status
         .urls
         .iter()
-        .filter(|m| include_with_info(m))
+        .filter(|m| last_sync(m))
         .filter(|m| min_completion_pct(m))
         .filter(|m| countries(m))
         .filter(|m| protocols(m))
