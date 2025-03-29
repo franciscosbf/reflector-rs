@@ -276,7 +276,7 @@ struct Reflector {
     connection_timeout: u64,
     /// The number of seconds to wait before a download times out
     #[arg(long, value_name = "n", default_value_t = DEFAULT_DOWNLOAD_TIMEOUT)]
-    donwload_timeout: u64,
+    download_timeout: u64,
     /// Display a table of the distribution of servers by country
     #[arg(long)]
     list_countries: bool,
@@ -557,65 +557,66 @@ fn sort_by_delay(mirrors: &mut [&MirrorStatus]) {
     });
 }
 
-fn process_mirrors<'s>(
-    reflector: &'s Reflector,
-    status: &'s Status,
-) -> Result<Vec<&'s MirrorStatus>, ReflectorError> {
+fn sort_mirrors(reflector: &Reflector, mirrors: &mut Vec<&MirrorStatus>) {
     let filters = &reflector.filters;
     let connection_timeout = Duration::from_secs(reflector.connection_timeout);
-    let download_timeout = Duration::from_secs(reflector.donwload_timeout);
-
-    let mut mirrors = filter_mirrors(filters, status);
-    if mirrors.is_empty() {
-        return Err(ReflectorError::WithoutMirrors);
-    }
-
-    let smirrors = &mut mirrors;
+    let download_timeout = Duration::from_secs(reflector.download_timeout);
 
     match filters.latest {
         Some(latest) if latest > 0 => {
-            sort_by_age(smirrors);
-            smirrors.truncate(latest as usize);
+            sort_by_age(mirrors);
+            mirrors.truncate(latest as usize);
         }
         _ => (),
     }
 
     match filters.score {
         Some(score) if score > 0 => {
-            sort_by_score(smirrors);
-            smirrors.truncate(score as usize);
+            sort_by_score(mirrors);
+            mirrors.truncate(score as usize);
         }
         _ => (),
     }
 
     match filters.fastest {
         Some(fastest) if fastest > 0 => {
-            sort_by_rate(smirrors, connection_timeout, download_timeout);
-            smirrors.truncate(fastest as usize);
+            sort_by_rate(mirrors, connection_timeout, download_timeout);
+            mirrors.truncate(fastest as usize);
         }
         _ => (),
     }
 
     match reflector.sort {
         Some(sort) if !(sort == Sort::Rate && filters.fastest.is_some()) => match sort {
-            Sort::Age => sort_by_age(smirrors),
-            Sort::Rate => sort_by_rate(smirrors, connection_timeout, download_timeout),
-            Sort::Country => sort_by_country(smirrors, filters.countries.as_ref()),
-            Sort::Score => sort_by_score(smirrors),
-            Sort::Delay => sort_by_delay(smirrors),
+            Sort::Age => sort_by_age(mirrors),
+            Sort::Rate => sort_by_rate(mirrors, connection_timeout, download_timeout),
+            Sort::Country => sort_by_country(mirrors, filters.countries.as_ref()),
+            Sort::Score => sort_by_score(mirrors),
+            Sort::Delay => sort_by_delay(mirrors),
         },
         _ => (),
     }
 
     if let Some(number) = filters.number {
-        smirrors.truncate(number as usize);
+        mirrors.truncate(number as usize);
+    }
+}
+
+fn process_mirrors<'s>(
+    reflector: &Reflector,
+    status: &'s Status,
+) -> Result<Vec<&'s MirrorStatus>, ReflectorError> {
+    let mut mirrors = filter_mirrors(&reflector.filters, status);
+    if mirrors.is_empty() {
+        return Err(ReflectorError::WithoutMirrors);
     }
 
-    if !mirrors.is_empty() {
-        Ok(mirrors)
-    } else {
-        Err(ReflectorError::WithoutMirrors)
+    sort_mirrors(reflector, &mut mirrors);
+    if mirrors.is_empty() {
+        return Err(ReflectorError::WithoutMirrors);
     }
+
+    Ok(mirrors)
 }
 
 fn output_countries(mirrors: &[MirrorStatus]) {
