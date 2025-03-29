@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use std::{
-    cmp::Ordering,
     collections::HashSet,
     env,
     fs::{self, File},
@@ -472,7 +471,7 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
         .collect()
 }
 
-fn sort_by_age(mirrors: &mut Vec<&MirrorStatus>) {
+fn sort_by_age(mirrors: &mut [&MirrorStatus]) {
     mirrors.sort_by(|a, b| {
         let a = a.last_sync.unwrap();
         let b = b.last_sync.unwrap();
@@ -481,7 +480,7 @@ fn sort_by_age(mirrors: &mut Vec<&MirrorStatus>) {
     });
 }
 
-fn sort_by_score(mirrors: &mut Vec<&MirrorStatus>) {
+fn sort_by_score(mirrors: &mut [&MirrorStatus]) {
     mirrors.sort_by(|a, b| {
         let a = a.score.unwrap();
         let b = b.score.unwrap();
@@ -491,7 +490,7 @@ fn sort_by_score(mirrors: &mut Vec<&MirrorStatus>) {
 }
 
 fn sort_by_rate(
-    mirrors: &mut Vec<&MirrorStatus>,
+    mirrors: &mut [&MirrorStatus],
     connection_timeout: Duration,
     download_timeout: Duration,
 ) {
@@ -502,14 +501,54 @@ fn sort_by_rate(
     todo!()
 }
 
-fn sort_by_country(mirrors: &mut Vec<&MirrorStatus>, countries: Option<&Vec<String>>) {
-    let _ = mirrors;
-    let _ = countries;
+fn sort_by_country_priorities(mirrors: &mut [&MirrorStatus], priorities: &[String]) {
+    let priority_countries = priorities
+        .iter()
+        .map(|c| c.to_uppercase())
+        .collect::<Vec<_>>();
+    let priority_countries_pos = |c: &str| priority_countries.iter().position(|pc| c == pc);
+    let default_priority_country = priority_countries
+        .iter()
+        .position(|c| c == "*")
+        .unwrap_or(priority_countries.len());
+    let priority_pair = |m: &MirrorStatus| {
+        let mc = m.country.to_uppercase();
+        if let Some(pos) = priority_countries_pos(mc.as_str()) {
+            return (pos, mc);
+        }
 
-    todo!()
+        let mcc = m.country_code.to_uppercase();
+        if let Some(pos) = priority_countries_pos(mcc.as_str()) {
+            return (pos, mc);
+        }
+
+        (default_priority_country, mc)
+    };
+
+    mirrors.sort_by(move |a, b| {
+        let a = priority_pair(a);
+        let b = priority_pair(b);
+
+        a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
+    });
 }
 
-fn sort_by_delay(mirrors: &mut Vec<&MirrorStatus>) {
+fn sort_by_country_simple(mirrors: &mut [&MirrorStatus]) {
+    mirrors.sort_by(|a, b| {
+        let a = a.country.to_uppercase();
+        let b = b.country.to_uppercase();
+
+        a.cmp(&b)
+    });
+}
+
+fn sort_by_country(mirrors: &mut [&MirrorStatus], countries: Option<&Vec<String>>) {
+    countries
+        .map(|countries| sort_by_country_priorities(mirrors, countries))
+        .unwrap_or_else(|| sort_by_country_simple(mirrors));
+}
+
+fn sort_by_delay(mirrors: &mut [&MirrorStatus]) {
     mirrors.sort_by(|a, b| {
         let a = a.delay.unwrap();
         let b = b.delay.unwrap();
