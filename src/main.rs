@@ -145,6 +145,7 @@ struct MirrorStatus {
     last_sync: Option<DateTime<Utc>>,
     completion_pct: f64,
     delay: Option<u64>,
+    score: Option<f64>,
     active: bool,
     country: String,
     country_code: String,
@@ -400,7 +401,10 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
 
     let min_completion_pct = filters.completion_percent / 100.;
     add_closure(Box::new(move |m| {
-        m.last_sync.is_some() && m.delay.is_some() && m.completion_pct >= min_completion_pct
+        m.completion_pct >= min_completion_pct
+            && m.last_sync.is_some()
+            && m.delay.is_some()
+            && m.score.is_some()
     }));
 
     if let Some(ref countries) = filters.countries {
@@ -468,15 +472,11 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
 }
 
 fn sort_by_age(mirrors: &mut Vec<&MirrorStatus>) {
-    let _ = mirrors;
-
-    todo!()
+    mirrors.sort_by(|a, b| a.last_sync.unwrap().cmp(&b.last_sync.unwrap()));
 }
 
 fn sort_by_score(mirrors: &mut Vec<&MirrorStatus>) {
-    let _ = mirrors;
-
-    todo!()
+    mirrors.sort_by(|a, b| a.score.unwrap().partial_cmp(&b.score.unwrap()).unwrap());
 }
 
 fn sort_by_rate(
@@ -499,9 +499,7 @@ fn sort_by_country(mirrors: &mut Vec<&MirrorStatus>, countries: Option<&Vec<Stri
 }
 
 fn sort_by_delay(mirrors: &mut Vec<&MirrorStatus>) {
-    let _ = mirrors;
-
-    todo!()
+    mirrors.sort_by(|a, b| a.delay.unwrap().cmp(&b.delay.unwrap()));
 }
 
 fn process_mirrors<'s>(
