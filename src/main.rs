@@ -488,131 +488,172 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
         .collect()
 }
 
-fn sort_by_age(mirrors: &mut [&MirrorStatus]) {
-    mirrors.sort_by(|a, b| {
-        let a = a.last_sync.unwrap();
-        let b = b.last_sync.unwrap();
-
-        b.cmp(&a)
-    });
-}
-
-fn sort_by_score(mirrors: &mut [&MirrorStatus]) {
-    mirrors.sort_by(|a, b| {
-        let a = a.score.unwrap();
-        let b = b.score.unwrap();
-
-        a.partial_cmp(&b).unwrap()
-    });
-}
-
-fn sort_by_rate(
-    mirrors: &mut [&MirrorStatus],
+struct Sorter<'s, 'c> {
+    mirrors: Vec<&'s MirrorStatus>,
+    threads: u64,
+    countries: Option<&'c Vec<String>>,
     connection_timeout: Duration,
     download_timeout: Duration,
-) {
-    let _ = mirrors;
-    let _ = connection_timeout;
-    let _ = download_timeout;
-
-    todo!()
 }
 
-fn sort_by_country_priorities(mirrors: &mut [&MirrorStatus], priority_countries: &[String]) {
-    let priority_countries_pos = |c: &str| priority_countries.iter().position(|pc| pc == c);
-    let default_priority_country = priority_countries
-        .iter()
-        .position(|pc| pc == "*")
-        .unwrap_or(priority_countries.len());
-    let priority_pair = |m: &MirrorStatus| {
-        let mc = m.country.to_uppercase();
-        if let Some(pos) = priority_countries_pos(mc.as_str()) {
-            return (pos, mc);
+impl<'s, 'c> Sorter<'s, 'c> {
+    fn new(
+        mirrors: Vec<&'s MirrorStatus>,
+        threads: u64,
+        countries: Option<&'c Vec<String>>,
+        connection_timeout: Duration,
+        download_timeout: Duration,
+    ) -> Self {
+        Self {
+            mirrors,
+            countries,
+            threads,
+            connection_timeout,
+            download_timeout,
         }
+    }
 
-        let mcc = m.country_code.to_uppercase();
-        if let Some(pos) = priority_countries_pos(mcc.as_str()) {
-            return (pos, mc);
+    fn by_age(&mut self) {
+        self.mirrors.sort_by(|a, b| {
+            let a = a.last_sync.unwrap();
+            let b = b.last_sync.unwrap();
+
+            b.cmp(&a)
+        });
+    }
+
+    fn by_rate(&mut self) {
+        todo!()
+    }
+
+    fn sort_by_country_priorities(&mut self, priority_countries: &[String]) {
+        let priority_countries_pos = |c: &str| priority_countries.iter().position(|pc| pc == c);
+        let default_priority_country = priority_countries
+            .iter()
+            .position(|pc| pc == "*")
+            .unwrap_or(priority_countries.len());
+        let priority_pair = |m: &MirrorStatus| {
+            let mc = m.country.to_uppercase();
+            if let Some(pos) = priority_countries_pos(mc.as_str()) {
+                return (pos, mc);
+            }
+
+            let mcc = m.country_code.to_uppercase();
+            if let Some(pos) = priority_countries_pos(mcc.as_str()) {
+                return (pos, mc);
+            }
+
+            (default_priority_country, mc)
+        };
+
+        self.mirrors.sort_by(move |a, b| {
+            let a = priority_pair(a);
+            let b = priority_pair(b);
+
+            a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
+        });
+    }
+
+    fn sort_by_country_simple(&mut self) {
+        self.mirrors.sort_by(|a, b| {
+            let a = a.country.to_uppercase();
+            let b = b.country.to_uppercase();
+
+            a.cmp(&b)
+        });
+    }
+
+    fn by_country(&mut self) {
+        self.countries
+            .map(|countries| self.sort_by_country_priorities(countries))
+            .unwrap_or_else(|| self.sort_by_country_simple());
+    }
+
+    fn by_score(&mut self) {
+        self.mirrors.sort_by(|a, b| {
+            let a = a.score.unwrap();
+            let b = b.score.unwrap();
+
+            a.partial_cmp(&b).unwrap()
+        });
+    }
+
+    fn by_delay(&mut self) {
+        self.mirrors.sort_by(|a, b| {
+            let a = a.delay.unwrap();
+            let b = b.delay.unwrap();
+
+            a.cmp(&b)
+        });
+    }
+
+    fn by(&mut self, sort: Sort) {
+        match sort {
+            Sort::Age => self.by_age(),
+            Sort::Rate => self.by_rate(),
+            Sort::Country => self.by_country(),
+            Sort::Score => self.by_score(),
+            Sort::Delay => self.by_delay(),
         }
+    }
 
-        (default_priority_country, mc)
-    };
+    fn truncate(&mut self, max: u64) {
+        self.mirrors.truncate(max as usize);
+    }
 
-    mirrors.sort_by(move |a, b| {
-        let a = priority_pair(a);
-        let b = priority_pair(b);
-
-        a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
-    });
+    fn into_resulting_mirrors(self) -> Vec<&'s MirrorStatus> {
+        self.mirrors
+    }
 }
 
-fn sort_by_country_simple(mirrors: &mut [&MirrorStatus]) {
-    mirrors.sort_by(|a, b| {
-        let a = a.country.to_uppercase();
-        let b = b.country.to_uppercase();
-
-        a.cmp(&b)
-    });
-}
-
-fn sort_by_country(mirrors: &mut [&MirrorStatus], countries: Option<&Vec<String>>) {
-    countries
-        .map(|countries| sort_by_country_priorities(mirrors, countries))
-        .unwrap_or_else(|| sort_by_country_simple(mirrors));
-}
-
-fn sort_by_delay(mirrors: &mut [&MirrorStatus]) {
-    mirrors.sort_by(|a, b| {
-        let a = a.delay.unwrap();
-        let b = b.delay.unwrap();
-
-        a.cmp(&b)
-    });
-}
-
-fn sort_mirrors(reflector: &Reflector, mirrors: &mut Vec<&MirrorStatus>) {
+fn sort_mirrors<'s>(
+    reflector: &Reflector,
+    mirrors: Vec<&'s MirrorStatus>,
+) -> Vec<&'s MirrorStatus> {
     let filters = &reflector.filters;
-    let connection_timeout = Duration::from_secs(reflector.connection_timeout);
-    let download_timeout = Duration::from_secs(reflector.download_timeout);
+
+    let mut sorter = Sorter::new(
+        mirrors,
+        reflector.threads,
+        filters.countries.as_ref(),
+        Duration::from_secs(reflector.connection_timeout),
+        Duration::from_secs(reflector.download_timeout),
+    );
 
     match filters.latest {
         Some(latest) if latest > 0 => {
-            sort_by_age(mirrors);
-            mirrors.truncate(latest as usize);
+            sorter.by_age();
+            sorter.truncate(latest);
         }
         _ => (),
     }
 
     match filters.score {
         Some(score) if score > 0 => {
-            sort_by_score(mirrors);
-            mirrors.truncate(score as usize);
+            sorter.by_score();
+            sorter.truncate(score);
         }
         _ => (),
     }
 
     match filters.fastest {
         Some(fastest) if fastest > 0 => {
-            sort_by_rate(mirrors, connection_timeout, download_timeout);
-            mirrors.truncate(fastest as usize);
+            sorter.by_rate();
+            sorter.truncate(fastest);
         }
         _ => (),
     }
 
     match reflector.sort {
-        Some(sort) if !(sort == Sort::Rate && filters.fastest.is_some()) => match sort {
-            Sort::Age => sort_by_age(mirrors),
-            Sort::Rate => sort_by_rate(mirrors, connection_timeout, download_timeout),
-            Sort::Country => sort_by_country(mirrors, filters.countries.as_ref()),
-            Sort::Score => sort_by_score(mirrors),
-            Sort::Delay => sort_by_delay(mirrors),
-        },
+        Some(sort) if sort != Sort::Rate || filters.fastest.is_none() => sorter.by(sort),
         _ => (),
     }
 
     if let Some(number) = filters.number {
-        mirrors.truncate(number as usize);
+        sorter.truncate(number);
     }
+
+    sorter.into_resulting_mirrors()
 }
 
 fn process_mirrors<'s>(
@@ -624,7 +665,7 @@ fn process_mirrors<'s>(
         return Err(ReflectorError::WithoutMirrors);
     }
 
-    sort_mirrors(reflector, &mut mirrors);
+    mirrors = sort_mirrors(reflector, mirrors);
     if mirrors.is_empty() {
         return Err(ReflectorError::WithoutMirrors);
     }
