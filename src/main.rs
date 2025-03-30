@@ -335,6 +335,34 @@ fn initialize_logger(verbose: bool) {
         .unwrap();
 }
 
+fn lookup_cache_location(url: &Url) -> PathBuf {
+    let cache_dir = match env::var(XDG_CACHE_HOME) {
+        Ok(cache_dir) => PathBuf::from(cache_dir),
+        Err(_) => match expanduser(DEFAULT_CACHE_DIR) {
+            Ok(cache_dir) => cache_dir,
+            Err(err) => {
+                let temp_dir = env::temp_dir();
+
+                log::warn!(
+                    "Unable to find user cache directory, cached mirrors will be placed in {}: {}",
+                    temp_dir.to_string_lossy(),
+                    err
+                );
+
+                temp_dir
+            }
+        },
+    };
+
+    let cache_file = format!(
+        "{}-{}.json",
+        PKG_NAME,
+        BASE64_URL_SAFE.encode(url.as_str().as_bytes())
+    );
+
+    cache_dir.join(cache_file)
+}
+
 fn cached_status(location: &Path, timeout: Duration) -> Result<Option<Status>, anyhow::Error> {
     let mut file = File::open(location)?;
     let modified = file.metadata()?.modified()?;
@@ -359,16 +387,7 @@ fn cache_status(location: &Path, status: &Status) -> Result<(), io::Error> {
 }
 
 fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
-    let cache_dir = match env::var(XDG_CACHE_HOME) {
-        Ok(cache) => PathBuf::from(cache),
-        Err(_) => expanduser(DEFAULT_CACHE_DIR).unwrap(),
-    };
-    let cache_file = format!(
-        "{}-{}.json",
-        PKG_NAME,
-        BASE64_URL_SAFE.encode(reflector.url.as_str().as_bytes())
-    );
-    let cache_location = cache_dir.join(cache_file);
+    let cache_location = lookup_cache_location(&reflector.url);
     let cache_timeout = Duration::from_secs(reflector.cache_timeout);
 
     match cached_status(&cache_location, cache_timeout) {
