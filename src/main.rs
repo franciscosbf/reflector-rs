@@ -526,7 +526,7 @@ impl<'s, 'c> Sorter<'s, 'c> {
         todo!()
     }
 
-    fn sort_by_country_priorities(&mut self, priority_countries: &[String]) {
+    fn by_country_priorities(&mut self, priority_countries: &[String]) {
         let priority_countries_pos = |c: &str| priority_countries.iter().position(|pc| pc == c);
         let default_priority_country = priority_countries
             .iter()
@@ -554,7 +554,7 @@ impl<'s, 'c> Sorter<'s, 'c> {
         });
     }
 
-    fn sort_by_country_simple(&mut self) {
+    fn by_country_simple(&mut self) {
         self.mirrors.sort_by(|a, b| {
             let a = a.country.as_str();
             let b = b.country.as_str();
@@ -565,8 +565,8 @@ impl<'s, 'c> Sorter<'s, 'c> {
 
     fn by_country(&mut self) {
         self.countries
-            .map(|countries| self.sort_by_country_priorities(countries))
-            .unwrap_or_else(|| self.sort_by_country_simple());
+            .map(|countries| self.by_country_priorities(countries))
+            .unwrap_or_else(|| self.by_country_simple());
     }
 
     fn by_score(&mut self) {
