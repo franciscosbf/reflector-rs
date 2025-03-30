@@ -556,10 +556,10 @@ impl<'s, 'c> Sorter<'s, 'c> {
 
     fn sort_by_country_simple(&mut self) {
         self.mirrors.sort_by(|a, b| {
-            let a = a.country.to_uppercase();
-            let b = b.country.to_uppercase();
+            let a = a.country.as_str();
+            let b = b.country.as_str();
 
-            a.cmp(&b)
+            a.cmp(b)
         });
     }
 
