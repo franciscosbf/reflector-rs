@@ -43,7 +43,7 @@ const ONE_HOUR_IN_SECS: f64 = 3600.;
 pub enum ReflectorError {
     #[error(transparent)]
     RetrieveMirrorsFailed(#[from] reqwest::Error),
-    #[error("without mirrors")]
+    #[error("no mirrors found")]
     WithoutMirrors,
     #[error(transparent)]
     WriteMirrorsFailed(#[from] io::Error),
