@@ -107,7 +107,7 @@ fn serialize_datetime_with_usec<S: Serializer>(
     serializer.serialize_str(&raw)
 }
 
-fn parse_country(s: &str) -> Result<String, String> {
+fn parse_uppercase_country(s: &str) -> Result<String, String> {
     let raw = s.to_uppercase();
 
     Ok(raw)
@@ -209,7 +209,7 @@ struct Filters {
         short = 'c',
         long = "country",
         value_name = "country name or code",
-        value_parser = parse_country,
+        value_parser = parse_uppercase_country,
         value_delimiter = ',',
         verbatim_doc_comment
     )]
