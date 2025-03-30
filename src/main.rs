@@ -288,7 +288,7 @@ struct Reflector {
     #[arg(
         long,
         value_name = "mirrors url",
-        default_value = "https://archlinux.org/mirrors/status/json/",
+        default_value = DEFAULT_MIRRORS_URL,
         verbatim_doc_comment
     )]
     url: Url,
