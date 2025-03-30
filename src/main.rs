@@ -15,7 +15,7 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Args, Parser, ValueEnum};
 use expanduser::expanduser;
 use fern::colors::{Color, ColoredLevelConfig};
-use log::LevelFilter;
+use log::Level;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
@@ -315,12 +315,13 @@ struct Reflector {
 }
 
 fn initialize_logger(verbose: bool) {
+    let non_verbose_levels = [Level::Info, Level::Error];
     let colored_level = ColoredLevelConfig::new()
         .warn(Color::Yellow)
         .info(Color::Green);
 
     fern::Dispatch::new()
-        .filter(move |metadata| verbose || metadata.level() == LevelFilter::Info)
+        .filter(move |metadata| verbose || non_verbose_levels.contains(&metadata.level()))
         .chain(io::stdout())
         .format(move |out, message, record| {
             out.finish(format_args!(
