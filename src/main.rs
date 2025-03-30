@@ -645,7 +645,7 @@ fn sort_mirrors<'s>(
     }
 
     match reflector.sort {
-        Some(sort) if sort != Sort::Rate || filters.fastest.is_none() => sorter.by(sort),
+        Some(sort) if !(sort == Sort::Rate && filters.fastest.is_some()) => sorter.by(sort),
         _ => (),
     }
 
