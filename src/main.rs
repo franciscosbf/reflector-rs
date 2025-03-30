@@ -5,7 +5,6 @@ use std::{
     env,
     fs::{self, File},
     io::{self, Read},
-    num::ParseIntError,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
@@ -108,10 +107,10 @@ fn serialize_datetime_with_usec<S: Serializer>(
     serializer.serialize_str(&raw)
 }
 
-fn parse_duration_in_secs(s: &str) -> Result<Duration, ParseIntError> {
-    let raw = s.parse::<u64>()?;
+fn parse_country(s: &str) -> Result<String, String> {
+    let raw = s.to_uppercase();
 
-    Ok(Duration::from_secs(raw))
+    Ok(raw)
 }
 
 fn parse_percentage(s: &str) -> Result<f64, String> {
@@ -210,6 +209,7 @@ struct Filters {
         short = 'c',
         long = "country",
         value_name = "country name or code",
+        value_parser = parse_country,
         value_delimiter = ',',
         verbatim_doc_comment
     )]
@@ -408,10 +408,7 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
     }));
 
     if let Some(ref countries) = filters.countries {
-        let countries = countries
-            .iter()
-            .map(|country| country.to_uppercase())
-            .collect::<HashSet<_>>();
+        let countries = countries.iter().collect::<HashSet<_>>();
 
         add_closure(Box::new(move |m| {
             countries.contains(&m.country.to_uppercase())
@@ -501,15 +498,11 @@ fn sort_by_rate(
     todo!()
 }
 
-fn sort_by_country_priorities(mirrors: &mut [&MirrorStatus], priorities: &[String]) {
-    let priority_countries = priorities
-        .iter()
-        .map(|c| c.to_uppercase())
-        .collect::<Vec<_>>();
-    let priority_countries_pos = |c: &str| priority_countries.iter().position(|pc| c == pc);
+fn sort_by_country_priorities(mirrors: &mut [&MirrorStatus], priority_countries: &[String]) {
+    let priority_countries_pos = |c: &str| priority_countries.iter().position(|pc| pc == c);
     let default_priority_country = priority_countries
         .iter()
-        .position(|c| c == "*")
+        .position(|pc| pc == "*")
         .unwrap_or(priority_countries.len());
     let priority_pair = |m: &MirrorStatus| {
         let mc = m.country.to_uppercase();
