@@ -20,6 +20,10 @@ use std::{
     process::{self, Stdio},
     time::{Duration, Instant, SystemTime},
 };
+use tabled::{
+    Table, Tabled,
+    settings::{Alignment, Style, object::Columns},
+};
 use thiserror::Error;
 use url::Url;
 use wait_timeout::ChildExt;
@@ -837,9 +841,54 @@ fn process_mirrors<'s>(
 }
 
 fn format_countries(mirrors: &[MirrorStatus]) -> String {
-    let _ = mirrors;
+    struct CountryMeta<'c> {
+        code: &'c str,
+        occurrences: u64,
+    }
 
-    todo!()
+    #[derive(Tabled)]
+    struct TableEntry<'c> {
+        #[tabled(rename = "Country")]
+        country: &'c str,
+        #[tabled(rename = "Code")]
+        code: &'c str,
+        #[tabled(rename = "Count")]
+        occurences: u64,
+    }
+
+    let mut countries: HashMap<&str, CountryMeta<'_>> = HashMap::new();
+    mirrors
+        .iter()
+        .filter(|m| !(m.country.is_empty() || m.country_code.is_empty()))
+        .for_each(|m| {
+            countries
+                .entry(&m.country)
+                .and_modify(|cm| cm.occurrences += 1)
+                .or_insert_with(|| CountryMeta {
+                    code: &m.country_code,
+                    occurrences: 1,
+                });
+        });
+
+    let mut entries = countries
+        .iter()
+        .map(|(c, cm)| TableEntry {
+            country: c,
+            code: cm.code,
+            occurences: cm.occurrences,
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| {
+        let a = a.country;
+        let b = b.country;
+
+        a.cmp(b)
+    });
+
+    Table::new(entries)
+        .with(Style::psql())
+        .modify(Columns::new(1..=2), Alignment::right())
+        .to_string()
 }
 
 fn output_countries(mirrors: &[MirrorStatus]) {

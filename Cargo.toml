@@ -54,3 +54,6 @@ version = "1.0.97"
 
 [dependencies.expanduser]
 version = "1.2.2"
+
+[dependencies.tabled]
+version = "0.18.0"
