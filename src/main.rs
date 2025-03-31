@@ -565,14 +565,16 @@ impl<'s, 'c> Sorter<'s, 'c> {
         let pool = ThreadPoolBuilder::new()
             .num_threads(self.threads as usize)
             .build()?;
-        let rates = DashMap::new();
 
-        pool.install(|| {
-            self.mirrors.par_iter().for_each(|m| {
-                let rate = self.rate(m);
+        let rates = pool.install(|| {
+            self.mirrors
+                .par_iter()
+                .map(|m| {
+                    let rate = self.rate(m);
 
-                rates.insert(&m.url, rate);
-            });
+                    (&m.url, rate)
+                })
+                .collect::<HashMap<_, _>>()
         });
 
         self.mirrors.sort_by(|a, b| {
