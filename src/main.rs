@@ -836,23 +836,48 @@ fn process_mirrors<'s>(
     Ok(mirrors)
 }
 
+fn format_countries(mirrors: &[MirrorStatus]) -> String {
+    let _ = mirrors;
+
+    todo!()
+}
+
 fn output_countries(mirrors: &[MirrorStatus]) {
+    let formatted_countries = format_countries(mirrors);
+
+    println!("{}", formatted_countries);
+}
+
+fn format_mirrors_info(mirrors: &[&MirrorStatus]) -> String {
+    let _ = mirrors;
+
+    todo!()
+}
+
+fn output_mirrors_info(mirrors: &[&MirrorStatus]) {
+    let formatted_mirrors_info = format_mirrors_info(mirrors);
+
+    println!("{}", formatted_mirrors_info);
+}
+
+fn format_mirrors(mirrors: &[&MirrorStatus]) -> String {
     let _ = mirrors;
 
     todo!()
 }
 
 fn output_mirrors(mirrors: &[&MirrorStatus]) {
-    let _ = mirrors;
+    let formatted_mirrors = format_mirrors(mirrors);
 
-    todo!()
+    println!("{}", formatted_mirrors);
 }
 
 fn record_mirrors(mirrors: &[&MirrorStatus], location: &Path) -> Result<(), ReflectorError> {
-    let _ = mirrors;
-    let _ = location;
+    let formatted_mirrors = format_mirrors(mirrors);
 
-    todo!()
+    fs::write(location, formatted_mirrors)?;
+
+    Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
@@ -870,6 +895,12 @@ fn main() -> anyhow::Result<()> {
 
     let mirrors =
         process_mirrors(&reflector, &status).context("failed to process retrieved mirrors")?;
+
+    if reflector.info {
+        output_mirrors_info(&mirrors);
+
+        return Ok(());
+    }
 
     if let Some(ref save) = reflector.save {
         record_mirrors(&mirrors, save).context("failed to write mirrors")?;
