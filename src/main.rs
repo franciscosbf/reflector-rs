@@ -328,12 +328,15 @@ fn initialize_logger(verbose: bool) {
         .info(Color::Green);
 
     fern::Dispatch::new()
-        .filter(move |metadata| verbose || non_verbose_levels.contains(&metadata.level()))
+        .filter(move |metadata| {
+            metadata.target() == PKG_NAME
+                && (verbose || non_verbose_levels.contains(&metadata.level()))
+        })
         .chain(io::stdout())
         .format(move |out, message, record| {
             out.finish(format_args!(
                 "[{}] [{}] [{}] {}",
-                humantime::format_rfc3339_millis(SystemTime::now()),
+                <DateTime<Utc>>::from(SystemTime::now()).format("%Y-%m-%d %H:%M:%S"),
                 colored_level.color(record.level()),
                 PKG_NAME,
                 message
@@ -417,7 +420,11 @@ fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
         log::warn!("Failed to cache mirrors: {}", error);
     }
 
-    log::info!("Retrieved mirrors from {mirrors_url}");
+    log::info!(
+        "Retrieved {} mirror(s) from '{}'",
+        status.urls.len(),
+        mirrors_url
+    );
 
     Ok(status)
 }
@@ -533,7 +540,7 @@ impl<'s, 'c> Sorter<'s, 'c> {
         });
     }
 
-    fn rate_rsync(&self, url: &Url) -> Result<(Duration, u64), anyhow::Error> {
+    fn rate_rsync(&self, url: &Url) -> Result<(Duration, f64), anyhow::Error> {
         let contimeout = format!("--contimeout={}", self.connection_timeout.as_secs());
 
         let temp_dir_prefix = format!("{}-rsync-", PKG_NAME);
@@ -575,12 +582,12 @@ impl<'s, 'c> Sorter<'s, 'c> {
         let db_file = temp_dir.path().join(extra_db);
         let size = db_file.metadata()?.size();
 
-        let rate = (elapsed, size / elapsed.as_secs());
+        let rate = (elapsed, size as f64 / elapsed.as_secs_f64());
 
         Ok(rate)
     }
 
-    fn rate_http(&self, url: &Url) -> Result<(Duration, u64), anyhow::Error> {
+    fn rate_http(&self, url: &Url) -> Result<(Duration, f64), anyhow::Error> {
         let client = reqwest::blocking::ClientBuilder::new()
             .connect_timeout(self.connection_timeout)
             .timeout(self.download_timeout)
@@ -593,12 +600,12 @@ impl<'s, 'c> Sorter<'s, 'c> {
         let size = response.bytes()?.len();
         let elapsed = start.elapsed();
 
-        let rate = (elapsed, size as u64 / elapsed.as_secs());
+        let rate = (elapsed, size as f64 / elapsed.as_secs_f64());
 
         Ok(rate)
     }
 
-    fn rate(&self, m: &MirrorStatus) -> u64 {
+    fn rate(&self, m: &MirrorStatus) -> f64 {
         let url = m.url.join(DB_SUBPATH).unwrap();
 
         let (time_delta, ratio) = match if m.protocol == Protocol::Rsync {
@@ -608,23 +615,28 @@ impl<'s, 'c> Sorter<'s, 'c> {
         } {
             Ok(rate) => rate,
             Err(err) => {
-                log::warn!("Failed to rate {}: {}", url.as_str(), err);
+                log::warn!("Failed to rate '{}': {}", m.url.as_str(), err);
 
-                return 0;
+                return 0.;
             }
         };
 
-        let _ = time_delta;
+        log::info!(
+            "Rate result of '{}': {:.2} KiB/s in {:.2} s",
+            m.url.as_str(),
+            ratio / KILOBIBYTE_PER_SEC,
+            time_delta.as_secs_f64(),
+        );
 
         ratio
     }
 
-    fn sort_by_rate(&mut self, rates: HashMap<&Url, u64>) {
+    fn sort_by_rate(&mut self, rates: HashMap<&Url, f64>) {
         self.mirrors.sort_by(|a, b| {
             let a = *rates.get(&a.url).unwrap();
             let b = *rates.get(&b.url).unwrap();
 
-            b.cmp(&a)
+            b.partial_cmp(&a).unwrap()
         });
     }
 
