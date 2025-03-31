@@ -317,7 +317,7 @@ struct Reflector {
 }
 
 fn initialize_logger(verbose: bool) {
-    let non_verbose_levels = [Level::Info, Level::Error];
+    let non_verbose_levels = [Level::Info];
     let colored_level = ColoredLevelConfig::new()
         .warn(Color::Yellow)
         .info(Color::Green);
