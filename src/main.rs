@@ -17,7 +17,7 @@ use dashmap::DashMap;
 use expanduser::expanduser;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
-use rayon::prelude::*;
+use rayon::{ThreadPoolBuildError, ThreadPoolBuilder};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
@@ -561,8 +561,8 @@ impl<'s, 'c> Sorter<'s, 'c> {
         });
     }
 
-    fn by_rate_threaded(&mut self) -> Result<(), rayon::ThreadPoolBuildError> {
-        let pool = rayon::ThreadPoolBuilder::new()
+    fn by_rate_threaded(&mut self) -> Result<(), ThreadPoolBuildError> {
+        let pool = ThreadPoolBuilder::new()
             .num_threads(self.threads as usize)
             .build()?;
         let rates = DashMap::new();
