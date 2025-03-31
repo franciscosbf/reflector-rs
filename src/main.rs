@@ -527,13 +527,13 @@ impl<'s, 'c> Sorter<'s, 'c> {
     fn rate_rsync(&self, url: &Url) -> u64 {
         let _ = url;
 
-        todo!()
+        todo!() // NOTE: 0 if something went wrong
     }
 
     fn rate_http(&self, url: &Url) -> u64 {
         let _ = url;
 
-        todo!()
+        todo!() // NOTE: 0 if something went wrong
     }
 
     fn rate(&self, m: &MirrorStatus) -> u64 {
