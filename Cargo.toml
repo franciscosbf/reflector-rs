@@ -27,6 +27,12 @@ version = "1.0.140"
 [dependencies.rayon]
 version = "1.10.0"
 
+[dependencies.tempfile]
+version = "3.19.1"
+
+[dependencies.wait-timeout]
+version = "0.2.1"
+
 [dependencies.regex]
 version = "1.11.1"
 

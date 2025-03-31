@@ -1,14 +1,5 @@
 #![allow(dead_code)]
 
-use std::{
-    collections::{HashMap, HashSet},
-    env,
-    fs::{self, File},
-    io::{self, Read},
-    path::{Path, PathBuf},
-    time::{Duration, SystemTime},
-};
-
 use anyhow::Context;
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -19,8 +10,19 @@ use log::Level;
 use rayon::{ThreadPoolBuildError, ThreadPoolBuilder, prelude::*};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    fs::{self, File},
+    io::{self, Read},
+    os::unix::fs::MetadataExt,
+    path::{Path, PathBuf},
+    process::{self, Stdio},
+    time::{Duration, Instant, SystemTime},
+};
 use thiserror::Error;
 use url::Url;
+use wait_timeout::ChildExt;
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
@@ -32,6 +34,8 @@ const PARSE_TIME_FORMAT_WITHOUT_USEC: &str = "%Y-%m-%dT%H:%M:%SZ";
 const XDG_CACHE_HOME: &str = "XDG_CACHE_HOME";
 const DEFAULT_CACHE_DIR: &str = "~/.cache";
 
+const RSYNC_CMD: &str = "rsync";
+
 const DB_SUBPATH: &str = "extra/os/x86_64/extra.db";
 
 const DEFAULT_CONNECTION_TIMEOUT: u64 = 5;
@@ -39,6 +43,8 @@ const DEFAULT_DOWNLOAD_TIMEOUT: u64 = 5;
 const DEFAULT_CACHE_TIMEOUT: u64 = 300;
 
 const ONE_HOUR_IN_SECS: f64 = 3600.;
+
+const KILOBIBYTE_PER_SEC: f64 = 1024.;
 
 #[derive(Debug, Error)]
 pub enum ReflectorError {
@@ -143,7 +149,7 @@ struct MirrorStatus {
         serialize_with = "serialize_datetime_without_usec"
     )]
     last_sync: Option<DateTime<Utc>>,
-    completion_pct: f64,
+    completion_pct: Option<f64>,
     delay: Option<u64>,
     score: Option<f64>,
     active: bool,
@@ -347,7 +353,7 @@ fn lookup_cache_location(url: &Url) -> PathBuf {
 
                 log::warn!(
                     "Unable to find user cache directory, cached mirrors will be placed in {}: {}",
-                    temp_dir.to_string_lossy(),
+                    temp_dir.display(),
                     err
                 );
 
@@ -420,12 +426,16 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
     let mut closures: Vec<Box<dyn Fn(&'s MirrorStatus) -> bool>> = vec![];
     let mut add_closure = |filter| closures.push(filter);
 
-    let min_completion_pct = filters.completion_percent / 100.;
-    add_closure(Box::new(move |m| {
-        m.completion_pct >= min_completion_pct
-            && m.last_sync.is_some()
+    add_closure(Box::new(|m| {
+        m.last_sync.is_some()
+            && m.completion_pct.is_some()
             && m.delay.is_some()
             && m.score.is_some()
+    }));
+
+    let min_completion_pct = filters.completion_percent / 100.;
+    add_closure(Box::new(move |m| {
+        m.completion_pct.unwrap() >= min_completion_pct
     }));
 
     if let Some(ref countries) = filters.countries {
@@ -523,24 +533,90 @@ impl<'s, 'c> Sorter<'s, 'c> {
         });
     }
 
-    fn rate_rsync(&self, url: &Url) -> u64 {
-        let _ = url;
+    fn rate_rsync(&self, url: &Url) -> Result<(Duration, u64), anyhow::Error> {
+        let contimeout = format!("--contimeout={}", self.connection_timeout.as_secs());
 
-        todo!() // NOTE: 0 if something went wrong
+        let temp_dir_prefix = format!("{}-rsync-", PKG_NAME);
+        let temp_dir = tempfile::Builder::new()
+            .prefix(temp_dir_prefix.as_str())
+            .tempdir()?;
+
+        let mut command = process::Command::new(RSYNC_CMD);
+        command
+            .args([
+                "-avL",
+                "--no-h",
+                "--no-motd",
+                contimeout.as_str(),
+                url.as_str(),
+                temp_dir.path().to_str().unwrap(),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        let start = Instant::now();
+        let mut child = command.spawn()?;
+        let wait = child.wait_timeout(self.download_timeout)?;
+        let elapsed = start.elapsed();
+
+        match wait {
+            Some(exit_code) => {
+                if !exit_code.success() {
+                    return Err(anyhow::anyhow!(format!(
+                        "{} didn't exit with zero",
+                        RSYNC_CMD
+                    )));
+                }
+            }
+            None => return Err(anyhow::anyhow!("timed out")),
+        }
+
+        let extra_db = Path::new(DB_SUBPATH).file_name().unwrap();
+        let db_file = temp_dir.path().join(extra_db);
+        let size = db_file.metadata()?.size();
+
+        let rate = (elapsed, size / elapsed.as_secs());
+
+        Ok(rate)
     }
 
-    fn rate_http(&self, url: &Url) -> u64 {
-        let _ = url;
+    fn rate_http(&self, url: &Url) -> Result<(Duration, u64), anyhow::Error> {
+        let client = reqwest::blocking::ClientBuilder::new()
+            .connect_timeout(self.connection_timeout)
+            .timeout(self.download_timeout)
+            .build()
+            .unwrap();
 
-        todo!() // NOTE: 0 if something went wrong
+        let response = client.get(url.as_str()).send()?;
+
+        let start = Instant::now();
+        let size = response.bytes()?.len();
+        let elapsed = start.elapsed();
+
+        let rate = (elapsed, size as u64 / elapsed.as_secs());
+
+        Ok(rate)
     }
 
     fn rate(&self, m: &MirrorStatus) -> u64 {
-        if m.protocol == Protocol::Rsync {
-            self.rate_rsync(&m.url)
+        let url = m.url.join(DB_SUBPATH).unwrap();
+
+        let (time_delta, ratio) = match if m.protocol == Protocol::Rsync {
+            self.rate_rsync(&url)
         } else {
-            self.rate_http(&m.url)
-        }
+            self.rate_http(&url)
+        } {
+            Ok(rate) => rate,
+            Err(err) => {
+                log::warn!("Failed to rate {}: {}", url.as_str(), err);
+
+                return 0;
+            }
+        };
+
+        let _ = time_delta;
+
+        ratio
     }
 
     fn sort_by_rate(&mut self, rates: HashMap<&Url, u64>) {
@@ -553,17 +629,17 @@ impl<'s, 'c> Sorter<'s, 'c> {
     }
 
     fn by_rate_sequential(&mut self) {
-        let rates = self
+        let ratios = self
             .mirrors
             .iter()
             .map(|m| {
-                let rate = self.rate(m);
+                let ratio = self.rate(m);
 
-                (&m.url, rate)
+                (&m.url, ratio)
             })
             .collect::<HashMap<_, _>>();
 
-        self.sort_by_rate(rates);
+        self.sort_by_rate(ratios);
     }
 
     fn by_rate_threaded(&mut self) -> Result<(), ThreadPoolBuildError> {
@@ -571,18 +647,18 @@ impl<'s, 'c> Sorter<'s, 'c> {
             .num_threads(self.threads as usize)
             .build()?;
 
-        let rates = pool.install(|| {
+        let ratio = pool.install(|| {
             self.mirrors
                 .par_iter()
                 .map(|m| {
-                    let rate = self.rate(m);
+                    let ratio = self.rate(m);
 
-                    (&m.url, rate)
+                    (&m.url, ratio)
                 })
                 .collect::<HashMap<_, _>>()
         });
 
-        self.sort_by_rate(rates);
+        self.sort_by_rate(ratio);
 
         Ok(())
     }
