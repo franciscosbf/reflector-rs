@@ -17,7 +17,7 @@ use dashmap::DashMap;
 use expanduser::expanduser;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
-use rayon::{ThreadPoolBuildError, ThreadPoolBuilder};
+use rayon::{ThreadPoolBuildError, ThreadPoolBuilder, prelude::*};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
@@ -567,13 +567,11 @@ impl<'s, 'c> Sorter<'s, 'c> {
             .build()?;
         let rates = DashMap::new();
 
-        pool.scope(|s| {
-            self.mirrors.iter().for_each(|m| {
-                s.spawn(|_| {
-                    let rate = self.rate(m);
+        pool.install(|| {
+            self.mirrors.par_iter().for_each(|m| {
+                let rate = self.rate(m);
 
-                    rates.insert(&m.url, rate);
-                });
+                rates.insert(&m.url, rate);
             });
         });
 
