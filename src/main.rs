@@ -13,7 +13,6 @@ use anyhow::Context;
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Args, Parser, ValueEnum};
-use dashmap::DashMap;
 use expanduser::expanduser;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
@@ -544,21 +543,27 @@ impl<'s, 'c> Sorter<'s, 'c> {
         }
     }
 
-    fn by_rate_sequential(&mut self) {
-        let mut rates = HashMap::new();
-
-        self.mirrors.iter().for_each(|m| {
-            let rate = self.rate(m);
-
-            rates.insert(&m.url, rate);
-        });
-
+    fn sort_by_rate(&mut self, rates: HashMap<&Url, u64>) {
         self.mirrors.sort_by(|a, b| {
             let a = *rates.get(&a.url).unwrap();
             let b = *rates.get(&b.url).unwrap();
 
             b.cmp(&a)
         });
+    }
+
+    fn by_rate_sequential(&mut self) {
+        let rates = self
+            .mirrors
+            .iter()
+            .map(|m| {
+                let rate = self.rate(m);
+
+                (&m.url, rate)
+            })
+            .collect::<HashMap<_, _>>();
+
+        self.sort_by_rate(rates);
     }
 
     fn by_rate_threaded(&mut self) -> Result<(), ThreadPoolBuildError> {
@@ -577,12 +582,7 @@ impl<'s, 'c> Sorter<'s, 'c> {
                 .collect::<HashMap<_, _>>()
         });
 
-        self.mirrors.sort_by(|a, b| {
-            let a = *rates.get(&a.url).unwrap();
-            let b = *rates.get(&b.url).unwrap();
-
-            b.cmp(&a)
-        });
+        self.sort_by_rate(rates);
 
         Ok(())
     }

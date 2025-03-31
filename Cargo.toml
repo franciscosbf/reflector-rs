@@ -24,9 +24,6 @@ features = ["derive"]
 [dependencies.serde_json]
 version = "1.0.140"
 
-[dependencies.dashmap]
-version = "6.1.0"
-
 [dependencies.rayon]
 version = "1.10.0"
 
