@@ -554,8 +554,8 @@ impl<'s, 'c> Sorter<'s, 'c> {
         });
 
         self.mirrors.sort_by(|a, b| {
-            let a = rates.get(&a.url).cloned().unwrap_or_default();
-            let b = rates.get(&b.url).cloned().unwrap_or_default();
+            let a = rates.get(&a.url).cloned().unwrap();
+            let b = rates.get(&b.url).cloned().unwrap();
 
             b.cmp(&a)
         });
@@ -578,8 +578,8 @@ impl<'s, 'c> Sorter<'s, 'c> {
         });
 
         self.mirrors.sort_by(|a, b| {
-            let a = rates.get(&a.url).map(|r| *r.value()).unwrap_or_default();
-            let b = rates.get(&b.url).map(|r| *r.value()).unwrap_or_default();
+            let a = *rates.get(&a.url).unwrap().value();
+            let b = *rates.get(&b.url).unwrap().value();
 
             b.cmp(&a)
         });
