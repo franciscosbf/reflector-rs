@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env,
     fs::{self, File},
     io::{self, Read},
@@ -13,9 +13,11 @@ use anyhow::Context;
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Args, Parser, ValueEnum};
+use dashmap::DashMap;
 use expanduser::expanduser;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
+use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use thiserror::Error;
@@ -506,8 +508,8 @@ impl<'s, 'c> Sorter<'s, 'c> {
     ) -> Self {
         Self {
             mirrors,
-            countries,
             threads,
+            countries,
             connection_timeout,
             download_timeout,
         }
@@ -522,8 +524,81 @@ impl<'s, 'c> Sorter<'s, 'c> {
         });
     }
 
-    fn by_rate(&mut self) {
+    fn rate_rsync(&self, url: &Url) -> u64 {
+        let _ = url;
+
         todo!()
+    }
+
+    fn rate_http(&self, url: &Url) -> u64 {
+        let _ = url;
+
+        todo!()
+    }
+
+    fn rate(&self, m: &MirrorStatus) -> u64 {
+        if m.protocol == Protocol::Rsync {
+            self.rate_rsync(&m.url)
+        } else {
+            self.rate_http(&m.url)
+        }
+    }
+
+    fn by_rate_sequential(&mut self) {
+        let mut rates = HashMap::new();
+
+        self.mirrors.iter().for_each(|m| {
+            let rate = self.rate(m);
+
+            rates.insert(&m.url, rate);
+        });
+
+        self.mirrors.sort_by(|a, b| {
+            let a = rates.get(&a.url).cloned().unwrap_or_default();
+            let b = rates.get(&b.url).cloned().unwrap_or_default();
+
+            b.cmp(&a)
+        });
+    }
+
+    fn by_rate_threaded(&mut self) -> Result<(), rayon::ThreadPoolBuildError> {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(self.threads as usize)
+            .build()?;
+        let rates = DashMap::new();
+
+        pool.scope(|s| {
+            self.mirrors.iter().for_each(|m| {
+                s.spawn(|_| {
+                    let rate = self.rate(m);
+
+                    rates.insert(&m.url, rate);
+                });
+            });
+        });
+
+        self.mirrors.sort_by(|a, b| {
+            let a = rates.get(&a.url).map(|r| *r.value()).unwrap_or_default();
+            let b = rates.get(&b.url).map(|r| *r.value()).unwrap_or_default();
+
+            b.cmp(&a)
+        });
+
+        Ok(())
+    }
+
+    fn by_rate(&mut self) {
+        if self.threads > 0 {
+            match self.by_rate_threaded() {
+                Ok(_) => return,
+                Err(err) => log::warn!(
+                    "Failed to perform multithreaded rating, going sequential: {}",
+                    err
+                ),
+            }
+        }
+
+        self.by_rate_sequential();
     }
 
     fn by_country_priorities(&mut self, priority_countries: &[String]) {
