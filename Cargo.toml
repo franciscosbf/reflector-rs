@@ -2,6 +2,10 @@
 name = "reflector"
 version = "0.1.0"
 edition = "2024"
+authors = ["Francisco Braço-Forte <f.s.f.b2001@gmail.com>"]
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/franciscosbf/reflector-rs"
 
 [dependencies.clap]
 version = "4.5.32"
