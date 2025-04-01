@@ -57,3 +57,6 @@ version = "1.2.2"
 
 [dependencies.tabled]
 version = "0.18.0"
+
+[dependencies.concat-string]
+version = "1.0.1"

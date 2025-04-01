@@ -4,6 +4,7 @@ use anyhow::Context;
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Args, Parser, ValueEnum};
+use concat_string::concat_string;
 use expanduser::expanduser;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
@@ -13,6 +14,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
     collections::{HashMap, HashSet},
     env,
+    fmt::Display,
     fs::{self, File},
     io::{self, Read},
     os::unix::fs::MetadataExt,
@@ -34,6 +36,7 @@ const DEFAULT_MIRRORS_URL: &str = "https://archlinux.org/mirrors/status/json/";
 
 const PARSE_TIME_FORMAT_WITH_USEC: &str = "%Y-%m-%dT%H:%M:%S%.3fZ";
 const PARSE_TIME_FORMAT_WITHOUT_USEC: &str = "%Y-%m-%dT%H:%M:%SZ";
+const DISPLAY_TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S UTC";
 
 const XDG_CACHE_HOME: &str = "XDG_CACHE_HOME";
 const DEFAULT_CACHE_DIR: &str = "~/.cache";
@@ -48,7 +51,7 @@ const DEFAULT_CACHE_TIMEOUT: u64 = 300;
 
 const ONE_HOUR_IN_SECS: f64 = 3600.;
 
-const KILOBIBYTE_PER_SEC: f64 = 1024.;
+const KILOBIBYTE: f64 = 1024.;
 
 #[derive(Debug, Error)]
 pub enum ReflectorError {
@@ -143,6 +146,19 @@ enum Protocol {
     Rsync,
 }
 
+impl Display for Protocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let repr = match self {
+            Protocol::Http => "http",
+            Protocol::Https => "https",
+            Protocol::Ftp => "ftp",
+            Protocol::Rsync => "rsync",
+        };
+
+        write!(f, "{}", repr)
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct MirrorStatus {
     #[serde(deserialize_with = "deserialize_url", serialize_with = "serialize_url")]
@@ -155,6 +171,8 @@ struct MirrorStatus {
     last_sync: Option<DateTime<Utc>>,
     completion_pct: Option<f64>,
     delay: Option<u64>,
+    duration_avg: Option<f64>,
+    duration_stddev: Option<f64>,
     score: Option<f64>,
     active: bool,
     country: String,
@@ -162,6 +180,7 @@ struct MirrorStatus {
     isos: bool,
     ipv4: bool,
     ipv6: bool,
+    details: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -441,6 +460,8 @@ fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorSt
         m.last_sync.is_some()
             && m.completion_pct.is_some()
             && m.delay.is_some()
+            && m.duration_avg.is_some()
+            && m.duration_stddev.is_some()
             && m.score.is_some()
     }));
 
@@ -628,7 +649,7 @@ impl<'s, 'c> Sorter<'s, 'c> {
         log::info!(
             "Rate result of '{}': {:.2} KiB/s in {:.2} s",
             m.url.as_str(),
-            ratio / KILOBIBYTE_PER_SEC,
+            ratio / KILOBIBYTE,
             time_delta.as_secs_f64(),
         );
 
@@ -898,9 +919,51 @@ fn output_countries(mirrors: &[MirrorStatus]) {
 }
 
 fn format_mirrors_info(mirrors: &[&MirrorStatus]) -> String {
-    let _ = mirrors;
+    let mut mirrors_info = String::new();
+    let fmt_mirror_info = |m: &MirrorStatus| {
+        format!(
+            "\
+{}$repo/os/$arch
+active          : {}
+completion_pct  : {}
+country         : {}
+country_code    : {}
+delay           : {}
+details         : {}
+duration_avg    : {}
+duration_stddev : {}
+ipv4            : {}
+ipv6            : {}
+isos            : {}
+last_sync       : {}
+protocol        : {}
+score           : {}",
+            m.url.as_str(),
+            m.active,
+            m.completion_pct.unwrap(),
+            m.country,
+            m.country_code,
+            m.delay.unwrap(),
+            m.details,
+            m.duration_avg.unwrap(),
+            m.duration_stddev.unwrap(),
+            m.ipv4,
+            m.ipv6,
+            m.isos,
+            m.last_sync.unwrap().format(DISPLAY_TIME_FORMAT),
+            m.protocol,
+            m.score.unwrap(),
+        )
+    };
 
-    todo!()
+    let m = mirrors.first().unwrap();
+    mirrors_info = concat_string!(mirrors_info, fmt_mirror_info(m));
+
+    mirrors.iter().skip(1).for_each(|m| {
+        mirrors_info = concat_string!(mirrors_info, "\n\n", fmt_mirror_info(m));
+    });
+
+    mirrors_info
 }
 
 fn output_mirrors_info(mirrors: &[&MirrorStatus]) {
