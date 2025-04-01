@@ -434,7 +434,10 @@ fn retrieve_status(reflector: &Reflector) -> Result<(Status, SystemTime), Reflec
 
     match cached_status(&cache_location, cache_timeout) {
         Ok(Some(cached)) => {
-            log::info!("Retrieved mirror status from cached file");
+            log::info!(
+                "Retrieved {} mirror(s) from cached file",
+                cached.0.urls.len()
+            );
 
             return Ok(cached);
         }
