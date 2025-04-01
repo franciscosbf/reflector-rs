@@ -8,7 +8,10 @@ use concat_string::concat_string;
 use expanduser::expanduser;
 use fern::colors::{Color, ColoredLevelConfig};
 use log::Level;
-use rayon::{ThreadPoolBuildError, ThreadPoolBuilder, prelude::*};
+use rayon::{
+    ThreadPoolBuildError, ThreadPoolBuilder,
+    iter::{IntoParallelRefIterator, ParallelIterator},
+};
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
