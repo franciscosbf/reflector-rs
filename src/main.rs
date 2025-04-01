@@ -1,3 +1,6 @@
+#[cfg(not(target_os = "linux"))]
+compile_error!("this program depends on linux specific dependencies");
+
 use anyhow::Context;
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use chrono::{DateTime, NaiveDateTime, Utc};
