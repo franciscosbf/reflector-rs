@@ -221,7 +221,7 @@ struct Filters {
     age: Option<f64>,
     /// Only return mirrors with a reported sync delay of n hours or less, where n is a float. For
     /// example. to limit the results to mirrors with a reported delay of 15 minutes or less, pass
-    /// 0.25.
+    /// 0.25
     #[arg(long, value_name = "n", verbatim_doc_comment)]
     delay: Option<f64>,
     /// Restrict mirrors to selected countries. Countries may be given by name or country code, or
