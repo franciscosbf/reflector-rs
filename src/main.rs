@@ -16,7 +16,7 @@ use std::{
     env,
     fmt::Display,
     fs::{self, File},
-    io::{self, Read},
+    io::{self, Read, Write},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::{self, Stdio},
@@ -871,7 +871,8 @@ trait Formatter {
     fn format(&self) -> String;
 
     fn output(&self) {
-        println!("{}", self.format());
+        print!("{}", self.format());
+        io::stdout().flush().unwrap();
     }
 }
 
@@ -925,10 +926,12 @@ impl Formatter for CountriesFormatter<'_> {
             a.cmp(b)
         });
 
-        Table::new(entries)
+        let countries = Table::new(entries)
             .with(Style::psql())
             .modify(Columns::new(1..=2), Alignment::right())
-            .to_string()
+            .to_string();
+
+        concat_string!(countries, "\n")
     }
 }
 
@@ -963,7 +966,8 @@ ipv6            : {}
 isos            : {}
 last_sync       : {}
 protocol        : {}
-score           : {}",
+score           : {}
+",
                 m.url.as_str(),
                 m.active,
                 m.completion_pct.unwrap(),
@@ -1018,7 +1022,8 @@ impl Formatter for MirrorsListFormatter<'_> {
 # When:       {}
 # From:       {}
 # Retrieved:  {}
-# Last Check: {}\n",
+# Last Check: {}
+",
             env::args().collect::<Vec<_>>().join(" "),
             <DateTime<Utc>>::from(SystemTime::now()).format(DISPLAY_TIME_FORMAT),
             self.from.as_str(),
@@ -1049,8 +1054,6 @@ impl Formatter for MirrorsListFormatter<'_> {
                 mirrors_list = concat_string!(mirrors_list, fmt_mirror(m));
             });
         }
-
-        mirrors_list.truncate(mirrors_list.len() - 1);
 
         mirrors_list
     }
