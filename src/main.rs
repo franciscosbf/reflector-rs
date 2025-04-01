@@ -398,21 +398,24 @@ fn lookup_cache_location(url: &Url) -> PathBuf {
     cache_dir.join(cache_file)
 }
 
-fn cached_status(location: &Path, timeout: Duration) -> Result<Option<Status>, anyhow::Error> {
+fn cached_status(
+    location: &Path,
+    timeout: Duration,
+) -> Result<Option<(Status, SystemTime)>, anyhow::Error> {
     let mut file = File::open(location)?;
     let modified = file.metadata()?.modified()?;
 
     let valid = SystemTime::now().duration_since(modified).unwrap() <= timeout;
-    let status = if valid {
+    if valid {
         let mut raw = vec![];
         file.read_to_end(&mut raw)?;
 
-        serde_json::from_slice(&raw)?
-    } else {
-        None
-    };
+        let status = serde_json::from_slice(&raw)?;
 
-    Ok(status)
+        Ok(Some((status, modified)))
+    } else {
+        Ok(None)
+    }
 }
 
 fn cache_status(location: &Path, status: &Status) -> Result<(), io::Error> {
@@ -421,15 +424,15 @@ fn cache_status(location: &Path, status: &Status) -> Result<(), io::Error> {
     fs::write(location, raw)
 }
 
-fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
+fn retrieve_status(reflector: &Reflector) -> Result<(Status, SystemTime), ReflectorError> {
     let cache_location = lookup_cache_location(&reflector.url);
     let cache_timeout = Duration::from_secs(reflector.cache_timeout);
 
     match cached_status(&cache_location, cache_timeout) {
-        Ok(Some(status)) => {
+        Ok(Some(cached)) => {
             log::info!("Retrieved mirror status from cached file");
 
-            return Ok(status);
+            return Ok(cached);
         }
         Ok(None) => {}
         Err(err) => {
@@ -444,13 +447,15 @@ fn retrieve_status(reflector: &Reflector) -> Result<Status, ReflectorError> {
         log::warn!("Failed to cache mirrors: {}", error);
     }
 
+    let retrieved = SystemTime::now();
+
     log::info!(
         "Retrieved {} mirror(s) from '{}'",
         status.urls.len(),
         mirrors_url
     );
 
-    Ok(status)
+    Ok((status, retrieved))
 }
 
 fn filter_mirrors<'s>(filters: &Filters, status: &'s Status) -> Vec<&'s MirrorStatus> {
@@ -862,68 +867,88 @@ fn process_mirrors<'s>(
     Ok(mirrors)
 }
 
-fn format_countries(mirrors: &[MirrorStatus]) -> String {
-    struct CountryMeta<'c> {
-        code: &'c str,
-        occurrences: u64,
-    }
+trait Formatter {
+    fn format(&self) -> String;
 
-    #[derive(Tabled)]
-    struct TableEntry<'c> {
-        #[tabled(rename = "Country")]
-        country: &'c str,
-        #[tabled(rename = "Code")]
-        code: &'c str,
-        #[tabled(rename = "Count")]
-        occurences: u64,
+    fn output(&self) {
+        println!("{}", self.format());
     }
+}
 
-    let mut countries: HashMap<&str, CountryMeta<'_>> = HashMap::new();
-    mirrors
-        .iter()
-        .filter(|m| !(m.country.is_empty() || m.country_code.is_empty()))
-        .for_each(|m| {
-            countries
-                .entry(&m.country)
-                .and_modify(|cm| cm.occurrences += 1)
-                .or_insert_with(|| CountryMeta {
-                    code: &m.country_code,
-                    occurrences: 1,
-                });
+struct CountriesFormatter<'f> {
+    mirrors: &'f [MirrorStatus],
+}
+
+impl Formatter for CountriesFormatter<'_> {
+    fn format(&self) -> String {
+        struct CountryMeta<'c> {
+            code: &'c str,
+            occurrences: u64,
+        }
+
+        #[derive(Tabled)]
+        struct TableEntry<'c> {
+            #[tabled(rename = "Country")]
+            country: &'c str,
+            #[tabled(rename = "Code")]
+            code: &'c str,
+            #[tabled(rename = "Count")]
+            occurences: u64,
+        }
+
+        let mut countries: HashMap<&str, CountryMeta<'_>> = HashMap::new();
+        self.mirrors
+            .iter()
+            .filter(|m| !(m.country.is_empty() || m.country_code.is_empty()))
+            .for_each(|m| {
+                countries
+                    .entry(&m.country)
+                    .and_modify(|cm| cm.occurrences += 1)
+                    .or_insert_with(|| CountryMeta {
+                        code: &m.country_code,
+                        occurrences: 1,
+                    });
+            });
+
+        let mut entries = countries
+            .iter()
+            .map(|(c, cm)| TableEntry {
+                country: c,
+                code: cm.code,
+                occurences: cm.occurrences,
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|a, b| {
+            let a = a.country;
+            let b = b.country;
+
+            a.cmp(b)
         });
 
-    let mut entries = countries
-        .iter()
-        .map(|(c, cm)| TableEntry {
-            country: c,
-            code: cm.code,
-            occurences: cm.occurrences,
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|a, b| {
-        let a = a.country;
-        let b = b.country;
-
-        a.cmp(b)
-    });
-
-    Table::new(entries)
-        .with(Style::psql())
-        .modify(Columns::new(1..=2), Alignment::right())
-        .to_string()
+        Table::new(entries)
+            .with(Style::psql())
+            .modify(Columns::new(1..=2), Alignment::right())
+            .to_string()
+    }
 }
 
-fn output_countries(mirrors: &[MirrorStatus]) {
-    let formatted_countries = format_countries(mirrors);
-
-    println!("{}", formatted_countries);
+impl<'f> CountriesFormatter<'f> {
+    fn new(mirrors: &'f [MirrorStatus]) -> Self {
+        Self { mirrors }
+    }
 }
 
-fn format_mirrors_info(mirrors: &[&MirrorStatus]) -> String {
-    let mut mirrors_info = String::new();
-    let fmt_mirror_info = |m: &MirrorStatus| {
-        format!(
-            "\
+struct MirrorsInfoFormatter<'f> {
+    mirrors: &'f [&'f MirrorStatus],
+}
+
+impl Formatter for MirrorsInfoFormatter<'_> {
+    fn format(&self) -> String {
+        let mut mirrors_info = "".to_string();
+
+        let fmt_mirror_info = |m: &MirrorStatus| {
+            format!(
+                "\
 {}$repo/os/$arch
 active          : {}
 completion_pct  : {}
@@ -939,58 +964,122 @@ isos            : {}
 last_sync       : {}
 protocol        : {}
 score           : {}",
-            m.url.as_str(),
-            m.active,
-            m.completion_pct.unwrap(),
-            m.country,
-            m.country_code,
-            m.delay.unwrap(),
-            m.details,
-            m.duration_avg.unwrap(),
-            m.duration_stddev.unwrap(),
-            m.ipv4,
-            m.ipv6,
-            m.isos,
-            m.last_sync.unwrap().format(DISPLAY_TIME_FORMAT),
-            m.protocol,
-            m.score.unwrap(),
-        )
-    };
+                m.url.as_str(),
+                m.active,
+                m.completion_pct.unwrap(),
+                m.country,
+                m.country_code,
+                m.delay.unwrap(),
+                m.details,
+                m.duration_avg.unwrap(),
+                m.duration_stddev.unwrap(),
+                m.ipv4,
+                m.ipv6,
+                m.isos,
+                m.last_sync.unwrap().format(DISPLAY_TIME_FORMAT),
+                m.protocol,
+                m.score.unwrap(),
+            )
+        };
 
-    let m = mirrors.first().unwrap();
-    mirrors_info = concat_string!(mirrors_info, fmt_mirror_info(m));
+        let m = self.mirrors.first().unwrap();
+        mirrors_info = concat_string!(mirrors_info, fmt_mirror_info(m));
 
-    mirrors.iter().skip(1).for_each(|m| {
-        mirrors_info = concat_string!(mirrors_info, "\n\n", fmt_mirror_info(m));
-    });
+        self.mirrors.iter().skip(1).for_each(|m| {
+            mirrors_info = concat_string!(mirrors_info, "\n\n", fmt_mirror_info(m));
+        });
 
-    mirrors_info
+        mirrors_info
+    }
 }
 
-fn output_mirrors_info(mirrors: &[&MirrorStatus]) {
-    let formatted_mirrors_info = format_mirrors_info(mirrors);
-
-    println!("{}", formatted_mirrors_info);
+impl<'f> MirrorsInfoFormatter<'f> {
+    fn new(mirrors: &'f [&'f MirrorStatus]) -> Self {
+        Self { mirrors }
+    }
 }
 
-fn format_mirrors(mirrors: &[&MirrorStatus]) -> String {
-    let _ = mirrors;
-
-    todo!()
+struct MirrorsListFormatter<'f> {
+    from: &'f Url,
+    last_check: &'f DateTime<Utc>,
+    retrieved: SystemTime,
+    include_countries: bool,
+    mirrors: &'f [&'f MirrorStatus],
 }
 
-fn output_mirrors(mirrors: &[&MirrorStatus]) {
-    let formatted_mirrors = format_mirrors(mirrors);
+impl Formatter for MirrorsListFormatter<'_> {
+    fn format(&self) -> String {
+        let mut mirrors_list = format!(
+            "\
+################################################################################
+################# Arch Linux mirrorlist generated by Reflector #################
+################################################################################
+# With:       {}
+# When:       {}
+# From:       {}
+# Retrieved:  {}
+# Last Check: {}\n",
+            env::args().collect::<Vec<_>>().join(" "),
+            <DateTime<Utc>>::from(SystemTime::now()).format(DISPLAY_TIME_FORMAT),
+            self.from.as_str(),
+            <DateTime<Utc>>::from(self.retrieved).format(DISPLAY_TIME_FORMAT),
+            self.last_check.format(DISPLAY_TIME_FORMAT)
+        );
 
-    println!("{}", formatted_mirrors);
+        let fmt_mirror = |m: &MirrorStatus| format!("Server = {}$repo/os/$arch\n", &m.url);
+
+        if self.include_countries {
+            let mut current_country = None;
+            self.mirrors.iter().for_each(|m| {
+                if current_country.is_none() || current_country != Some(&m.country) {
+                    mirrors_list = concat_string!(
+                        mirrors_list,
+                        format!("\n# {} [{}]\n", m.country, m.country_code)
+                    );
+
+                    current_country = Some(&m.country);
+                }
+
+                mirrors_list = concat_string!(mirrors_list, fmt_mirror(m));
+            });
+        } else {
+            mirrors_list = concat_string!(mirrors_list, "\n");
+
+            self.mirrors.iter().for_each(|m| {
+                mirrors_list = concat_string!(mirrors_list, fmt_mirror(m));
+            });
+        }
+
+        mirrors_list.truncate(mirrors_list.len() - 1);
+
+        mirrors_list
+    }
 }
 
-fn record_mirrors(mirrors: &[&MirrorStatus], location: &Path) -> Result<(), ReflectorError> {
-    let formatted_mirrors = format_mirrors(mirrors);
+impl<'f> MirrorsListFormatter<'f> {
+    fn new(
+        from: &'f Url,
+        last_check: &'f DateTime<Utc>,
+        retrieved: SystemTime,
+        include_countries: bool,
+        mirrors: &'f [&'f MirrorStatus],
+    ) -> Self {
+        Self {
+            from,
+            last_check,
+            retrieved,
+            include_countries,
+            mirrors,
+        }
+    }
 
-    fs::write(location, formatted_mirrors)?;
+    fn record(&self, location: &Path) -> Result<(), ReflectorError> {
+        let formatted = self.format();
 
-    Ok(())
+        fs::write(location, formatted)?;
+
+        Ok(())
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -998,10 +1087,10 @@ fn main() -> anyhow::Result<()> {
 
     initialize_logger(reflector.verbose);
 
-    let status = retrieve_status(&reflector).context("failed to retrieve mirrors")?;
+    let (status, retrieved) = retrieve_status(&reflector).context("failed to retrieve mirrors")?;
 
     if reflector.list_countries {
-        output_countries(&status.urls);
+        CountriesFormatter::new(&status.urls).output();
 
         return Ok(());
     }
@@ -1010,15 +1099,24 @@ fn main() -> anyhow::Result<()> {
         process_mirrors(&reflector, &status).context("failed to process retrieved mirrors")?;
 
     if reflector.info {
-        output_mirrors_info(&mirrors);
+        MirrorsInfoFormatter::new(&mirrors).output();
 
         return Ok(());
     }
 
+    let mirrors_list_formater = MirrorsListFormatter::new(
+        &reflector.url,
+        &status.last_check,
+        retrieved,
+        matches!(reflector.sort, Some(Sort::Country)),
+        &mirrors,
+    );
     if let Some(ref save) = reflector.save {
-        record_mirrors(&mirrors, save).context("failed to write mirrors")?;
+        mirrors_list_formater
+            .record(save)
+            .context("failed to write mirrors")?;
     } else {
-        output_mirrors(&mirrors);
+        mirrors_list_formater.output();
     }
 
     Ok(())
