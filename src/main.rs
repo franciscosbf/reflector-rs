@@ -36,6 +36,7 @@ const DEFAULT_MIRRORS_URL: &str = "https://archlinux.org/mirrors/status/json/";
 
 const PARSE_TIME_FORMAT_WITH_USEC: &str = "%Y-%m-%dT%H:%M:%S%.3fZ";
 const PARSE_TIME_FORMAT_WITHOUT_USEC: &str = "%Y-%m-%dT%H:%M:%SZ";
+const LOGGER_TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 const DISPLAY_TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S UTC";
 
 const XDG_CACHE_HOME: &str = "XDG_CACHE_HOME";
@@ -359,9 +360,9 @@ fn initialize_logger(verbose: bool) {
         .format(move |out, message, record| {
             out.finish(format_args!(
                 "[{}] [{}] [{}] {}",
-                <DateTime<Utc>>::from(SystemTime::now()).format("%Y-%m-%d %H:%M:%S"),
+                <DateTime<Utc>>::from(SystemTime::now()).format(LOGGER_TIME_FORMAT),
                 colored_level.color(record.level()),
-                PKG_NAME,
+                record.target(),
                 message
             ));
         })
