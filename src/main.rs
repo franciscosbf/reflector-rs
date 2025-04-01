@@ -1,7 +1,7 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("this program depends on linux specific dependencies");
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use base64::{Engine, prelude::BASE64_URL_SAFE};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use clap::{Args, Parser, ValueEnum};
@@ -604,13 +604,10 @@ impl<'s, 'c> Sorter<'s, 'c> {
         match wait {
             Some(exit_code) => {
                 if !exit_code.success() {
-                    return Err(anyhow::anyhow!(format!(
-                        "{} didn't exit with zero",
-                        RSYNC_CMD
-                    )));
+                    return Err(anyhow!(format!("{} didn't exit with zero", RSYNC_CMD)));
                 }
             }
-            None => return Err(anyhow::anyhow!("timed out")),
+            None => return Err(anyhow!("timed out")),
         }
 
         let extra_db = Path::new(DB_SUBPATH).file_name().unwrap();
@@ -632,7 +629,16 @@ impl<'s, 'c> Sorter<'s, 'c> {
         let response = client.get(url.as_str()).send()?;
 
         let start = Instant::now();
-        let size = response.bytes()?.len();
+        let size = match response.bytes() {
+            Ok(body) => body.len(),
+            Err(err) => {
+                return Err(if err.is_timeout() {
+                    anyhow!("timed out")
+                } else {
+                    anyhow::Error::new(err)
+                });
+            }
+        };
         let elapsed = start.elapsed();
 
         let rate = (elapsed, size as f64 / elapsed.as_secs_f64());
